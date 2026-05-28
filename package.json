@@ -1,0 +1,20 @@
+{
+  "name": "agent-chat-for-obsidian",
+  "version": "0.1.0",
+  "description": "An Obsidian plugin that provides a unified continuous chat workspace for Codex, Claude, Hermes, and OpenClaw.",
+  "main": "main.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "obsidian",
+    "plugin",
+    "agent",
+    "codex",
+    "claude",
+    "hermes",
+    "openclaw"
+  ],
+  "author": "YikR",
+  "license": "MIT"
+}
