@@ -59,6 +59,7 @@ class AgentChatView extends ItemView {
       this.plugin.createTab("codex");
       return this.render();
     }
+    const isRunning = this.plugin.isSessionRunning(session.id);
 
     const statusBar = container.createDiv({ cls: "agent-chat-statusbar" });
     for (const providerId of Object.keys(this.plugin.settings.providers)) {
@@ -162,6 +163,7 @@ class AgentChatView extends ItemView {
     };
 
     const stopButton = header.createEl("button", { text: "停止" });
+    stopButton.disabled = !isRunning;
     stopButton.onclick = () => {
       this.plugin.stopActiveRun();
     };
@@ -209,13 +211,14 @@ class AgentChatView extends ItemView {
       }
     };
     const send = footer.createEl("button", { text: "发送" });
+    send.disabled = isRunning;
     send.onclick = async () => {
       const value = input.value.trim();
       if (!value) {
         return;
       }
       input.value = "";
-      await this.plugin.sendMessageToActiveSession(value);
+      void this.plugin.sendMessageToActiveSession(value);
       await this.render();
     };
   }
@@ -486,6 +489,10 @@ module.exports = class AgentChatPlugin extends Plugin {
     }
   }
 
+  isSessionRunning(sessionId) {
+    return this.running.has(sessionId);
+  }
+
   getLastAssistantMessage(session) {
     return [...(session.messages || [])].reverse().find((message) => message.role === "assistant") || null;
   }
@@ -616,9 +623,43 @@ module.exports = class AgentChatPlugin extends Plugin {
 
   async probeAllProviders() {
     new Notice("开始检测全部 Agent");
-    for (const providerId of this.getProviderIds()) {
-      await this.probeOneProvider(providerId);
+    const providerIds = this.getProviderIds();
+    const enabledIds = [];
+    for (const providerId of providerIds) {
+      const provider = this.settings.providers[providerId];
+      if (!provider || !provider.enabled) {
+        recordProviderResult(this.state.providerStatus, providerId, {
+          ok: false,
+          message: "该 Agent 已在设置中停用",
+        });
+        continue;
+      }
+      enabledIds.push(providerId);
+      markProviderRunning(this.state.providerStatus, providerId);
     }
+    await this.persist();
+    await this.refreshOpenViews();
+
+    await Promise.all(enabledIds.map(async (providerId) => {
+      try {
+        const result = await probeProvider(providerId, this.settings, {
+          cwd: this.app.vault.adapter.basePath,
+          timeoutMs: 30000,
+        });
+        recordProviderResult(this.state.providerStatus, providerId, {
+          ok: true,
+          message: result.assistantText,
+          command: result.command,
+        });
+      } catch (error) {
+        recordProviderResult(this.state.providerStatus, providerId, {
+          ok: false,
+          message: error && error.message ? error.message : String(error),
+        });
+      }
+    }));
+    await this.persist();
+    await this.refreshOpenViews();
     new Notice("Agent 检测完成");
   }
 
@@ -633,6 +674,10 @@ module.exports = class AgentChatPlugin extends Plugin {
       new Notice(`${this.providerLabel(providerId)} 已在设置中停用`);
       return;
     }
+    if (this.isSessionRunning(session.id)) {
+      new Notice("当前会话仍在运行中");
+      return;
+    }
 
     const promptForTitle = userInput.trim();
     const promptSession = {
@@ -643,11 +688,12 @@ module.exports = class AgentChatPlugin extends Plugin {
     if (!session.title || session.title.includes("新会话")) {
       session.title = promptForTitle.slice(0, 40);
     }
+    this.running.set(session.id, null);
+    markProviderRunning(this.state.providerStatus, providerId);
     await this.persist();
+    await this.refreshOpenViews();
 
     try {
-      markProviderRunning(this.state.providerStatus, providerId);
-      await this.persist();
       const result = await runProviderTurn(providerId, promptSession, userInput, this.settings, {
         cwd: this.app.vault.adapter.basePath,
         onSpawn: (child) => {
@@ -675,6 +721,7 @@ module.exports = class AgentChatPlugin extends Plugin {
       }
 
       await this.persist();
+      await this.refreshOpenViews();
     } catch (error) {
       this.running.delete(session.id);
       const message = error && error.message ? error.message : String(error);
@@ -684,6 +731,7 @@ module.exports = class AgentChatPlugin extends Plugin {
         message,
       });
       await this.persist();
+      await this.refreshOpenViews();
       new Notice(`${this.providerLabel(providerId)} 运行失败：${message}`);
     }
   }

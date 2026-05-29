@@ -29,6 +29,8 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - 默认启用你的 Obsidian 专用工作流入口：工作台、任务板、项目主页、最新项目更新、运行面板
 - 新会话默认绑定 `02-项目/Obsidian工作流/项目主页.md`
 - 支持把当前会话一键派单到 `AI AGENTS/Agent任务板.md`
+- 发送消息后会立即刷新对话区，provider 在后台继续运行
+- `检测全部 Agent` 会并行检测，减少等待时间
 - 设置页可配置每个 provider 的 CLI 路径、工作目录、额外参数和启用状态
 
 ## 当前边界
