@@ -8,6 +8,8 @@ const {
 } = require("../src/sessionRegistry");
 const { buildPromptFromSession } = require("../src/promptCompiler");
 const { createSpawnSpec } = require("../src/providers");
+const { recordProviderResult, summarizeProviderStatus } = require("../src/providerStatus");
+const { renderSessionMarkdown } = require("../src/sessionExport");
 const { resolveWritebackTargets } = require("../src/writebackTargets");
 
 test("createDefaultState returns a usable empty shell", () => {
@@ -171,4 +173,53 @@ test("createSpawnSpec builds an openclaw local agent command", () => {
   assert.deepEqual(spec.args.slice(0, 4), ["agent", "--local", "--json", "--session-key"]);
   assert.equal(spec.args[4], "agent:main:plugin-session-openclaw");
   assert.match(spec.args.at(-1), /当前输入：plan next move/);
+});
+
+test("recordProviderResult stores success and failure status by provider", () => {
+  const status = {};
+
+  recordProviderResult(status, "codex", {
+    ok: true,
+    message: "OK",
+    command: "codex exec",
+  });
+  recordProviderResult(status, "openclaw", {
+    ok: false,
+    message: "network error",
+    command: "openclaw agent",
+  });
+
+  assert.equal(status.codex.state, "ok");
+  assert.equal(status.codex.lastMessage, "OK");
+  assert.equal(status.openclaw.state, "error");
+  assert.equal(status.openclaw.lastError, "network error");
+  assert.equal(status.openclaw.lastCommand, "openclaw agent");
+});
+
+test("summarizeProviderStatus returns Chinese display text", () => {
+  assert.equal(summarizeProviderStatus(undefined, true), "未检测");
+  assert.equal(summarizeProviderStatus(undefined, false), "已停用");
+  assert.equal(summarizeProviderStatus({ state: "running" }, true), "运行中");
+  assert.equal(summarizeProviderStatus({ state: "ok" }, true), "可用");
+  assert.equal(summarizeProviderStatus({ state: "error" }, true), "异常");
+});
+
+test("renderSessionMarkdown exports a readable Chinese transcript", () => {
+  const session = createSession({
+    id: "session-export",
+    providerId: "claude",
+    title: "整理插件说明",
+    projectPath: "02-项目/Obsidian工作流/项目主页.md",
+  });
+  upsertMessage(session, { role: "user", content: "先列结构" });
+  upsertMessage(session, { role: "assistant", content: "可以分成三层。" });
+
+  const markdown = renderSessionMarkdown(session, "Claude");
+
+  assert.match(markdown, /^# 整理插件说明/);
+  assert.match(markdown, /- Agent：Claude/);
+  assert.match(markdown, /- 绑定项目：\[\[02-项目\/Obsidian工作流\/项目主页\]\]/);
+  assert.match(markdown, /## 对话记录/);
+  assert.match(markdown, /\*\*用户\*\*：先列结构/);
+  assert.match(markdown, /\*\*助手\*\*：可以分成三层。/);
 });

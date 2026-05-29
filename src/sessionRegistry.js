@@ -8,6 +8,7 @@ function createDefaultState() {
     sessions: {},
     activeTabId: null,
     settings: {},
+    providerStatus: {},
   };
 }
 

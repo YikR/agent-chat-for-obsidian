@@ -6,20 +6,71 @@
   padding: 12px;
 }
 
+.agent-chat-statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-chat-provider-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.agent-chat-provider-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.agent-chat-provider-status.status-ok .agent-chat-provider-dot {
+  background: var(--color-green);
+}
+
+.agent-chat-provider-status.status-error .agent-chat-provider-dot {
+  background: var(--color-red);
+}
+
+.agent-chat-provider-status.status-running .agent-chat-provider-dot {
+  background: var(--color-yellow);
+}
+
+.agent-chat-provider-status.status-disabled {
+  opacity: 0.55;
+}
+
 .agent-chat-header,
 .agent-chat-footer {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .agent-chat-provider {
   min-width: 120px;
 }
 
+.agent-chat-title {
+  min-width: 160px;
+  flex: 1 1 180px;
+}
+
 .agent-chat-project,
 .agent-chat-input {
   flex: 1;
+}
+
+.agent-chat-project {
+  min-width: 260px;
 }
 
 .agent-chat-tabs {
@@ -33,10 +84,16 @@
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--background-secondary);
   cursor: pointer;
   white-space: nowrap;
+  max-width: 260px;
+}
+
+.agent-chat-tab span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .agent-chat-tab.is-active {
@@ -62,7 +119,7 @@
 
 .agent-chat-message {
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: 6px;
   background: var(--background-secondary);
 }
 
@@ -83,4 +140,9 @@
 .agent-chat-input {
   min-height: 72px;
   resize: vertical;
+}
+
+.agent-chat-footer button,
+.agent-chat-header button {
+  white-space: nowrap;
 }

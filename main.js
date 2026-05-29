@@ -2,6 +2,8 @@ const { Plugin, ItemView, PluginSettingTab, Setting, Notice, MarkdownView } = re
 
 const { createDefaultState, createSession, upsertMessage } = require("./src/sessionRegistry");
 const { DEFAULT_PROVIDER_SETTINGS, runProviderTurn } = require("./src/providers");
+const { makeSessionExportPath, renderSessionMarkdown } = require("./src/sessionExport");
+const { markProviderRunning, recordProviderResult, summarizeProviderStatus } = require("./src/providerStatus");
 const { resolveWritebackTargets } = require("./src/writebackTargets");
 const { writebackSessionResult } = require("./src/writeback");
 
@@ -34,7 +36,7 @@ class AgentChatView extends ItemView {
   }
 
   getDisplayText() {
-    return "Agent Chat";
+    return "Agent 对话";
   }
 
   async onOpen() {
@@ -54,6 +56,21 @@ class AgentChatView extends ItemView {
     if (!session) {
       this.plugin.createTab("codex");
       return this.render();
+    }
+
+    const statusBar = container.createDiv({ cls: "agent-chat-statusbar" });
+    for (const providerId of Object.keys(this.plugin.settings.providers)) {
+      const provider = this.plugin.settings.providers[providerId];
+      const status = this.plugin.state.providerStatus[providerId];
+      const text = summarizeProviderStatus(status, provider.enabled);
+      const item = statusBar.createDiv({
+        cls: `agent-chat-provider-status status-${(status || {}).state || (provider.enabled ? "unknown" : "disabled")}`,
+      });
+      item.createSpan({ cls: "agent-chat-provider-dot" });
+      item.createSpan({ text: `${this.plugin.providerLabel(providerId)}：${text}` });
+      if (status && (status.lastError || status.lastMessage)) {
+        item.setAttr("title", status.lastError || status.lastMessage);
+      }
     }
 
     const header = container.createDiv({ cls: "agent-chat-header" });
@@ -79,6 +96,18 @@ class AgentChatView extends ItemView {
       await this.plugin.persist();
     };
 
+    const titleInput = header.createEl("input", {
+      cls: "agent-chat-title",
+      type: "text",
+      placeholder: "会话标题",
+      value: session.title || "",
+    });
+    titleInput.onchange = async () => {
+      this.plugin.renameActiveSession(titleInput.value.trim());
+      await this.plugin.persist();
+      await this.render();
+    };
+
     const bindCurrentButton = header.createEl("button", { text: "绑定当前笔记" });
     bindCurrentButton.onclick = async () => {
       const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -98,6 +127,17 @@ class AgentChatView extends ItemView {
       await this.render();
     };
 
+    const writebackButton = header.createEl("button", { text: "写回" });
+    writebackButton.onclick = async () => {
+      await this.plugin.writebackActiveSession();
+      await this.render();
+    };
+
+    const exportButton = header.createEl("button", { text: "导出" });
+    exportButton.onclick = async () => {
+      await this.plugin.exportActiveSession();
+    };
+
     const stopButton = header.createEl("button", { text: "停止" });
     stopButton.onclick = () => {
       this.plugin.stopActiveRun();
@@ -109,7 +149,7 @@ class AgentChatView extends ItemView {
       const tabButton = tabsBar.createDiv({
         cls: `agent-chat-tab${tab.id === this.plugin.state.activeTabId ? " is-active" : ""}`,
       });
-      tabButton.createSpan({ text: (tabSession == null ? void 0 : tabSession.title) || "New conversation" });
+      tabButton.createSpan({ text: (tabSession == null ? void 0 : tabSession.title) || "新会话" });
       const close = tabButton.createEl("button", { cls: "agent-chat-tab-close", text: "×" });
       close.onclick = async (event) => {
         event.stopPropagation();
@@ -126,7 +166,10 @@ class AgentChatView extends ItemView {
     const transcript = container.createDiv({ cls: "agent-chat-transcript" });
     for (const message of session.messages) {
       const messageEl = transcript.createDiv({ cls: `agent-chat-message role-${message.role}` });
-      const meta = messageEl.createDiv({ cls: "agent-chat-message-meta", text: message.role.toUpperCase() });
+      const meta = messageEl.createDiv({
+        cls: "agent-chat-message-meta",
+        text: message.role === "user" ? "用户" : "助手",
+      });
       meta.setAttr("data-created-at", message.createdAt || "");
       messageEl.createDiv({ cls: "agent-chat-message-body", text: message.content });
     }
@@ -136,6 +179,12 @@ class AgentChatView extends ItemView {
       cls: "agent-chat-input",
       placeholder: "继续推进这个问题…",
     });
+    input.onkeydown = async (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        event.preventDefault();
+        send.click();
+      }
+    };
     const send = footer.createEl("button", { text: "发送" });
     send.onclick = async () => {
       const value = input.value.trim();
@@ -160,8 +209,8 @@ class AgentChatSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     new Setting(containerEl)
-      .setName("Auto writeback")
-      .setDesc("After each completed turn, write a short summary back into the mapped Obsidian pages.")
+      .setName("自动写回")
+      .setDesc("每轮对话完成后，把摘要写回对应的 Obsidian 最新页、最近活动页和绑定项目页。")
       .addToggle((toggle) => {
         toggle.setValue(this.plugin.settings.autoWriteback).onChange(async (value) => {
           this.plugin.settings.autoWriteback = value;
@@ -174,7 +223,7 @@ class AgentChatSettingTab extends PluginSettingTab {
       containerEl.createEl("h3", { text: this.plugin.providerLabel(providerId) });
 
       new Setting(containerEl)
-        .setName(`${this.plugin.providerLabel(providerId)} enabled`)
+        .setName(`${this.plugin.providerLabel(providerId)} 启用`)
         .addToggle((toggle) => {
           toggle.setValue(provider.enabled).onChange(async (value) => {
             provider.enabled = value;
@@ -183,7 +232,7 @@ class AgentChatSettingTab extends PluginSettingTab {
         });
 
       new Setting(containerEl)
-        .setName(`${this.plugin.providerLabel(providerId)} CLI path`)
+        .setName(`${this.plugin.providerLabel(providerId)} CLI 路径`)
         .addText((text) => {
           text.setValue(provider.cliPath).onChange(async (value) => {
             provider.cliPath = value.trim();
@@ -192,8 +241,8 @@ class AgentChatSettingTab extends PluginSettingTab {
         });
 
       new Setting(containerEl)
-        .setName(`${this.plugin.providerLabel(providerId)} working directory`)
-        .setDesc("Leave empty to use the vault path.")
+        .setName(`${this.plugin.providerLabel(providerId)} 工作目录`)
+        .setDesc("留空时使用当前 vault 路径。")
         .addText((text) => {
           text.setValue(provider.cwd || "").onChange(async (value) => {
             provider.cwd = value.trim();
@@ -202,8 +251,8 @@ class AgentChatSettingTab extends PluginSettingTab {
         });
 
       new Setting(containerEl)
-        .setName(`${this.plugin.providerLabel(providerId)} extra args`)
-        .setDesc("Optional extra CLI arguments appended to the provider command.")
+        .setName(`${this.plugin.providerLabel(providerId)} 额外参数`)
+        .setDesc("可选 CLI 参数，会追加到该 provider 命令末尾。")
         .addText((text) => {
           text.setValue(provider.extraArgs || "").onChange(async (value) => {
             provider.extraArgs = value;
@@ -223,12 +272,12 @@ module.exports = class AgentChatPlugin extends Plugin {
     await this.restore();
 
     this.registerView(VIEW_TYPE_AGENT_CHAT, (leaf) => new AgentChatView(leaf, this));
-    this.addRibbonIcon("bot", "Open Agent Chat", async () => {
+    this.addRibbonIcon("bot", "打开 Agent 对话", async () => {
       await this.activateView();
     });
     this.addCommand({
       id: "open-agent-chat-view",
-      name: "Open Agent Chat",
+      name: "打开 Agent 对话",
       callback: async () => {
         await this.activateView();
       },
@@ -260,6 +309,7 @@ module.exports = class AgentChatPlugin extends Plugin {
       sessions: (saved.state || {}).sessions || {},
       tabs: (saved.state || {}).tabs || [],
       activeTabId: (saved.state || {}).activeTabId || null,
+      providerStatus: (saved.state || {}).providerStatus || {},
     };
   }
 
@@ -285,7 +335,7 @@ module.exports = class AgentChatPlugin extends Plugin {
     const session = createSession({
       id: sessionId,
       providerId,
-      title: `New ${this.providerLabel(providerId)} conversation`,
+      title: `${this.providerLabel(providerId)} 新会话`,
     });
     this.state.sessions[sessionId] = session;
     this.state.tabs.push({
@@ -316,8 +366,17 @@ module.exports = class AgentChatPlugin extends Plugin {
     }
     session.providerId = providerId;
     if (!session.title || session.title.startsWith("New ")) {
-      session.title = `New ${this.providerLabel(providerId)} conversation`;
+      session.title = `${this.providerLabel(providerId)} 新会话`;
     }
+    void this.persist();
+  }
+
+  renameActiveSession(title) {
+    const session = this.getActiveSession();
+    if (!session || !title) {
+      return;
+    }
+    session.title = title;
     void this.persist();
   }
 
@@ -357,8 +416,61 @@ module.exports = class AgentChatPlugin extends Plugin {
     const running = this.running.get(session.id);
     if (running && typeof running.kill === "function") {
       running.kill("SIGTERM");
-      new Notice("Stopped current provider run");
+      new Notice("已停止当前 Agent 运行");
     }
+  }
+
+  getLastAssistantMessage(session) {
+    return [...(session.messages || [])].reverse().find((message) => message.role === "assistant") || null;
+  }
+
+  async writebackActiveSession() {
+    const session = this.getActiveSession();
+    if (!session) {
+      return;
+    }
+    const lastAssistant = this.getLastAssistantMessage(session);
+    if (!lastAssistant) {
+      new Notice("当前会话还没有可写回的助手回复");
+      return;
+    }
+    const targets = resolveWritebackTargets(session.providerId, session.projectPath);
+    session.lastWriteback = await writebackSessionResult(
+      this.app,
+      session.providerId,
+      session,
+      lastAssistant.content,
+      targets,
+    );
+    await this.persist();
+    new Notice("已写回 Obsidian");
+  }
+
+  async ensureFolderPath(folderPath) {
+    const parts = folderPath.split("/").filter(Boolean);
+    let current = "";
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      await this.app.vault.createFolder(current).catch(() => {});
+    }
+  }
+
+  async exportActiveSession() {
+    const session = this.getActiveSession();
+    if (!session) {
+      return;
+    }
+    const filePath = makeSessionExportPath(session);
+    const folder = filePath.split("/").slice(0, -1).join("/");
+    await this.ensureFolderPath(folder);
+    const existing = this.app.vault.getAbstractFileByPath(filePath);
+    const markdown = renderSessionMarkdown(session, this.providerLabel(session.providerId));
+    if (existing) {
+      await this.app.vault.modify(existing, markdown);
+    } else {
+      await this.app.vault.create(filePath, markdown);
+    }
+    new Notice(`已导出会话：${filePath}`);
   }
 
   async sendMessageToActiveSession(userInput) {
@@ -369,7 +481,7 @@ module.exports = class AgentChatPlugin extends Plugin {
     const providerId = session.providerId;
     const provider = this.settings.providers[providerId];
     if (!provider || !provider.enabled) {
-      new Notice(`${this.providerLabel(providerId)} is disabled in settings`);
+      new Notice(`${this.providerLabel(providerId)} 已在设置中停用`);
       return;
     }
 
@@ -379,12 +491,14 @@ module.exports = class AgentChatPlugin extends Plugin {
       messages: [...session.messages],
     };
     upsertMessage(session, { role: "user", content: userInput });
-    if (!session.title || session.title.startsWith("New ")) {
+    if (!session.title || session.title.includes("新会话")) {
       session.title = promptForTitle.slice(0, 40);
     }
     await this.persist();
 
     try {
+      markProviderRunning(this.state.providerStatus, providerId);
+      await this.persist();
       const result = await runProviderTurn(providerId, promptSession, userInput, this.settings, {
         cwd: this.app.vault.adapter.basePath,
         onSpawn: (child) => {
@@ -394,6 +508,11 @@ module.exports = class AgentChatPlugin extends Plugin {
       this.running.delete(session.id);
       const assistantText = result.assistantText;
       upsertMessage(session, { role: "assistant", content: assistantText });
+      recordProviderResult(this.state.providerStatus, providerId, {
+        ok: true,
+        message: assistantText,
+        command: result.command,
+      });
 
       if (this.settings.autoWriteback) {
         const targets = resolveWritebackTargets(providerId, session.projectPath);
@@ -411,8 +530,12 @@ module.exports = class AgentChatPlugin extends Plugin {
       this.running.delete(session.id);
       const message = error && error.message ? error.message : String(error);
       upsertMessage(session, { role: "assistant", content: `运行失败：${message}` });
+      recordProviderResult(this.state.providerStatus, providerId, {
+        ok: false,
+        message,
+      });
       await this.persist();
-      new Notice(`${this.providerLabel(providerId)} failed: ${message}`);
+      new Notice(`${this.providerLabel(providerId)} 运行失败：${message}`);
     }
   }
 };
