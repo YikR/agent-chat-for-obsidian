@@ -1,4 +1,4 @@
-const { Plugin, ItemView, PluginSettingTab, Setting, Notice, MarkdownView } = require("obsidian");
+const { Plugin, ItemView, PluginSettingTab, Setting, Notice, MarkdownView, Platform } = require("obsidian");
 
 const { createDefaultState, createSession, updateMessageContent, upsertMessage } = require("./src/sessionRegistry");
 const { DEFAULT_PROVIDER_SETTINGS, probeProvider, runProviderTurn } = require("./src/providers");
@@ -9,6 +9,7 @@ const { writebackSessionResult } = require("./src/writeback");
 const { WORKFLOW_DEFAULTS, formatTaskBoardRow, insertTaskRow } = require("./src/workflowConfig");
 
 const VIEW_TYPE_AGENT_CHAT = "agent-chat-view";
+const MOBILE_LOCAL_CLI_MESSAGE = "手机端 Obsidian 不能直接运行本机 CLI Agent。已把这条输入记录在会话里；如需执行，请同步到桌面端继续运行，或使用“派单到任务板”进入调度流。";
 
 function cloneProviderSettings() {
   return JSON.parse(JSON.stringify(DEFAULT_PROVIDER_SETTINGS));
@@ -88,6 +89,13 @@ class AgentChatView extends ItemView {
       }
     }
 
+    if (this.plugin.isMobileRuntime()) {
+      container.createDiv({
+        cls: "agent-chat-mobile-banner",
+        text: "手机端模式：可查看会话、写回、导出和派单；本地 CLI Agent 只能在桌面端运行。",
+      });
+    }
+
     const controlPanel = container.createDiv({ cls: "agent-chat-controlpanel" });
     const contextRow = controlPanel.createDiv({ cls: "agent-chat-context-row" });
 
@@ -151,6 +159,10 @@ class AgentChatView extends ItemView {
     };
 
     const probeAllButton = primaryActions.createEl("button", { text: "检测全部 Agent" });
+    probeAllButton.disabled = this.plugin.isMobileRuntime();
+    if (this.plugin.isMobileRuntime()) {
+      probeAllButton.setAttr("title", "手机端不能运行本地 CLI 检测");
+    }
     probeAllButton.onclick = async () => {
       await this.plugin.probeAllProviders();
       await this.render();
@@ -230,7 +242,7 @@ class AgentChatView extends ItemView {
     const footer = container.createDiv({ cls: "agent-chat-footer" });
     const input = footer.createEl("textarea", {
       cls: "agent-chat-input",
-      placeholder: "继续推进这个问题…",
+      placeholder: this.plugin.isMobileRuntime() ? "手机端会记录输入；执行请回桌面端或派单…" : "继续推进这个问题…",
     });
     input.onkeydown = async (event) => {
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -261,6 +273,13 @@ class AgentChatSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
+
+    if (this.plugin.isMobileRuntime()) {
+      containerEl.createDiv({
+        cls: "agent-chat-mobile-settings-note",
+        text: "当前是手机端 Obsidian：插件会以移动工作台模式运行，本地 CLI 路径、工作目录和检测功能只在桌面端生效。",
+      });
+    }
 
     new Setting(containerEl)
       .setName("自动写回")
@@ -396,6 +415,14 @@ module.exports = class AgentChatPlugin extends Plugin {
     return (this.settings.providers[providerId] || {}).label || providerId;
   }
 
+  isMobileRuntime() {
+    return Boolean(Platform && Platform.isMobile);
+  }
+
+  canRunLocalProviders() {
+    return !this.isMobileRuntime();
+  }
+
   async restore() {
     const saved = (await this.loadData()) || {};
     this.settings = {
@@ -428,7 +455,7 @@ module.exports = class AgentChatPlugin extends Plugin {
   }
 
   async activateView() {
-    const leaf = this.app.workspace.getRightLeaf(false);
+    const leaf = this.isMobileRuntime() ? this.app.workspace.getLeaf(true) : this.app.workspace.getRightLeaf(false);
     await leaf.setViewState({
       type: VIEW_TYPE_AGENT_CHAT,
       active: true,
@@ -671,6 +698,16 @@ module.exports = class AgentChatPlugin extends Plugin {
   }
 
   async probeOneProvider(providerId) {
+    if (!this.canRunLocalProviders()) {
+      recordProviderResult(this.state.providerStatus, providerId, {
+        ok: false,
+        message: "手机端不能运行本地 CLI Agent，请在桌面端检测。",
+      });
+      await this.persist();
+      await this.refreshOpenViews();
+      return;
+    }
+
     const provider = this.settings.providers[providerId];
     if (!provider || !provider.enabled) {
       recordProviderResult(this.state.providerStatus, providerId, {
@@ -706,6 +743,19 @@ module.exports = class AgentChatPlugin extends Plugin {
   }
 
   async probeAllProviders() {
+    if (!this.canRunLocalProviders()) {
+      for (const providerId of this.getProviderIds()) {
+        recordProviderResult(this.state.providerStatus, providerId, {
+          ok: false,
+          message: "手机端不能运行本地 CLI Agent，请在桌面端检测。",
+        });
+      }
+      await this.persist();
+      await this.refreshOpenViews();
+      new Notice("手机端不能运行本地 CLI 检测");
+      return;
+    }
+
     new Notice("开始检测全部 Agent");
     const providerIds = this.getProviderIds();
     const enabledIds = [];
@@ -771,6 +821,17 @@ module.exports = class AgentChatPlugin extends Plugin {
     upsertMessage(session, { role: "user", content: userInput });
     if (!session.title || session.title.includes("新会话")) {
       session.title = promptForTitle.slice(0, 40);
+    }
+    if (!this.canRunLocalProviders()) {
+      upsertMessage(session, { role: "assistant", content: MOBILE_LOCAL_CLI_MESSAGE });
+      recordProviderResult(this.state.providerStatus, providerId, {
+        ok: false,
+        message: "手机端记录输入，不运行本地 CLI。",
+      });
+      await this.persist();
+      await this.refreshOpenViews();
+      new Notice("已记录输入；执行请回桌面端或派单到任务板");
+      return;
     }
     this.running.set(session.id, null);
     markProviderRunning(this.state.providerStatus, providerId);

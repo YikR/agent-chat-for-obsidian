@@ -47,6 +47,17 @@
   opacity: 0.55;
 }
 
+.agent-chat-mobile-banner,
+.agent-chat-mobile-settings-note {
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .agent-chat-footer {
   display: flex;
   gap: 8px;
@@ -239,6 +250,21 @@
 }
 
 @media (max-width: 760px) {
+  .agent-chat-root {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .agent-chat-statusbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .agent-chat-provider-status {
+    flex: 0 0 auto;
+  }
+
   .agent-chat-context-row {
     grid-template-columns: 1fr;
   }
@@ -250,5 +276,17 @@
   .agent-chat-more-actions-menu {
     left: 0;
     right: auto;
+  }
+
+  .agent-chat-footer {
+    align-items: stretch;
+  }
+
+  .agent-chat-input {
+    flex-basis: 100%;
+  }
+
+  .agent-chat-footer button {
+    width: 100%;
   }
 }

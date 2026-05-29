@@ -1,9 +1,3 @@
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-const crypto = require("node:crypto");
-const { spawn } = require("node:child_process");
-
 const { buildPromptFromSession } = require("./promptCompiler");
 
 const DEFAULT_PROVIDER_SETTINGS = {
@@ -57,6 +51,8 @@ function uniquePaths(paths) {
 }
 
 function buildExecutionEnv(baseEnv = process.env) {
+  const os = require("node:os");
+  const path = require("node:path");
   const home = baseEnv.HOME || os.homedir();
   const basePath = baseEnv.PATH || "";
   const extraPaths = [
@@ -116,7 +112,16 @@ function extractOpenClawText(raw) {
 }
 
 function stableUuid(seed) {
-  const hash = crypto.createHash("sha256").update(seed).digest("hex");
+  let hash = "";
+  for (let i = 0; hash.length < 32; i += 1) {
+    let value = 0x811c9dc5 ^ i;
+    for (const char of `${seed}:${i}`) {
+      value ^= char.charCodeAt(0);
+      value = Math.imul(value, 0x01000193) >>> 0;
+    }
+    hash += value.toString(16).padStart(8, "0");
+  }
+  hash = hash.slice(0, 32);
   return [
     hash.slice(0, 8),
     hash.slice(8, 12),
@@ -187,6 +192,9 @@ function createSpawnSpec(providerId, session, userInput, settings, options = {})
   const extraArgs = splitArgs(config.extraArgs);
 
   if (providerId === "codex") {
+    const os = require("node:os");
+    const path = require("node:path");
+    const fs = require("node:fs");
     const outputFile = path.join(os.tmpdir(), `agent-chat-codex-${Date.now()}.txt`);
     const nativeSession = resolveNativeSession(providerId, session);
     const resumeTarget = nativeSession.sessionId || nativeSession.threadName;
@@ -298,6 +306,7 @@ function createProbeSession(providerId) {
 }
 
 function runSpawnSpec(spec, timeoutMs, options = {}) {
+  const { spawn } = require("node:child_process");
   return new Promise((resolve, reject) => {
     const child = spawn(spec.cliPath, spec.args, {
       cwd: spec.cwd,

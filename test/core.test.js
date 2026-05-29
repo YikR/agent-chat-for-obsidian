@@ -328,6 +328,22 @@ test("release bundle does not depend on source files at runtime", () => {
   assert.match(bundle, /__agentChatRequire/);
 });
 
+test("provider module does not import desktop-only Node APIs at module load", () => {
+  const source = fs.readFileSync("src/providers.js", "utf8");
+  const topLevel = source.slice(0, source.indexOf("const { buildPromptFromSession }"));
+
+  assert.doesNotMatch(topLevel, /node:child_process/);
+  assert.doesNotMatch(topLevel, /node:fs/);
+  assert.doesNotMatch(topLevel, /node:os/);
+  assert.doesNotMatch(topLevel, /node:path/);
+});
+
+test("manifest allows mobile Obsidian installation", () => {
+  const manifest = JSON.parse(fs.readFileSync("manifest.json", "utf8"));
+
+  assert.equal(manifest.isDesktopOnly, false);
+});
+
 test("workflow defaults point at the user's Obsidian workflow pages", () => {
   assert.equal(WORKFLOW_DEFAULTS.enabled, true);
   assert.equal(WORKFLOW_DEFAULTS.defaultProjectPath, "02-项目/Obsidian工作流/项目主页.md");

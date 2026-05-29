@@ -19,6 +19,8 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - `Agent 对话` 视图，可放在右侧边栏使用
 - 多 tab、多会话、本地持久化
 - 支持 `Codex`、`Claude`、`Hermes`、`OpenClaw` 四个 provider
+- 支持手机端 Obsidian 安装和加载
+- 手机端提供移动工作台模式：查看会话、绑定项目、写回、导出、派单
 - 每个会话可绑定 Obsidian 项目页
 - 支持会话标题编辑
 - 支持手动写回和自动写回
@@ -41,7 +43,7 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 
 ## 当前边界
 
-这版已经完成插件壳、会话状态、CLI adapter 和 Obsidian 写回桥，但每个 provider 的真实可用性仍取决于本机环境。
+这版已经完成插件壳、会话状态、CLI adapter、移动端加载适配和 Obsidian 写回桥，但每个 provider 的真实可用性仍取决于本机环境。
 
 在当前实现机器上的首轮冒烟结果：
 
@@ -51,6 +53,18 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - `Claude`：仍需要在真实 Obsidian 运行环境里确认
 
 因此当前结论是：插件已经可安装、可打开、可管理会话；四个 provider 的本机运行链还需要逐个联调。
+
+### 手机端说明
+
+手机端 Obsidian 不能直接运行 macOS 上的 `codex / claude / hermes / openclaw` CLI，因此插件在手机上会自动进入移动工作台模式：
+
+- 可以打开插件、查看和管理会话
+- 可以绑定当前笔记或项目页
+- 可以写回、导出、派单到 Agent任务板
+- 不能直接检测或运行本地 CLI Agent
+- 在手机端发送输入时，插件会把输入记录进会话，并提示回桌面端继续执行或派单到任务板
+
+如果后续要在手机端真正触发 agent 执行，需要另加一个桌面 Mac 上运行的 HTTP bridge；手机插件通过局域网或公网安全入口调用这个 bridge。
 
 ### 原生续接说明
 
@@ -94,6 +108,8 @@ ln -sfn /Users/yanyunuo/agent-chat-for-obsidian \
 8. 需要进入调度流时，点击 `派单到任务板`
 
 `检测全部 Agent` 会对每个启用的 provider 发起最小调用：`Reply with exactly: OK`。成功会标记为 `可用`，失败会标记为 `异常`，错误原因可通过状态提示查看。
+
+手机端不会运行 `检测全部 Agent`，因为移动端没有本地 CLI 执行环境。
 
 ## 写回规则
 
