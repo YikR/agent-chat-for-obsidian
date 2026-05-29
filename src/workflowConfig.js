@@ -2,6 +2,7 @@ const WORKFLOW_DEFAULTS = {
   enabled: true,
   defaultProjectPath: "02-项目/Obsidian工作流/项目主页.md",
   taskBoardPath: "AI AGENTS/Agent任务板.md",
+  agentStatusPath: "AI AGENTS/接入状态.md",
   quickLinks: [
     { label: "工作台", path: "00-首页/工作台.md" },
     { label: "任务板", path: "AI AGENTS/Agent任务板.md" },

@@ -6,6 +6,7 @@ const { makeSessionExportPath, renderSessionMarkdown } = require("./src/sessionE
 const { markProviderRunning, recordProviderResult, summarizeProviderStatus } = require("./src/providerStatus");
 const { resolveWritebackTargets } = require("./src/writebackTargets");
 const { writebackSessionResult } = require("./src/writeback");
+const { writeProviderStatusToObsidian } = require("./src/agentStatusBridge");
 const { WORKFLOW_DEFAULTS, formatTaskBoardRow, insertTaskRow } = require("./src/workflowConfig");
 
 const VIEW_TYPE_AGENT_CHAT = "agent-chat-view";
@@ -331,6 +332,16 @@ class AgentChatSettingTab extends PluginSettingTab {
       .addText((text) => {
         text.setValue(this.plugin.settings.obsidianWorkflow.taskBoardPath).onChange(async (value) => {
           this.plugin.settings.obsidianWorkflow.taskBoardPath = value.trim();
+          await this.plugin.persist();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Agent接入状态路径")
+      .setDesc("检测全部 Agent 后，会把最近可用性快照写入这个页面，供工作台和运行面板读取。")
+      .addText((text) => {
+        text.setValue(this.plugin.settings.obsidianWorkflow.agentStatusPath).onChange(async (value) => {
+          this.plugin.settings.obsidianWorkflow.agentStatusPath = value.trim();
           await this.plugin.persist();
         });
       });
@@ -698,6 +709,23 @@ module.exports = class AgentChatPlugin extends Plugin {
     new Notice("已派单到 Agent任务板");
   }
 
+  async syncProviderStatusToWorkflow() {
+    if (!this.settings.obsidianWorkflow.enabled) {
+      return;
+    }
+    const statusPath = this.settings.obsidianWorkflow.agentStatusPath || WORKFLOW_DEFAULTS.agentStatusPath;
+    if (!statusPath) {
+      return;
+    }
+    await writeProviderStatusToObsidian(
+      this.app,
+      statusPath,
+      this.getProviderIds(),
+      this.settings.providers,
+      this.state.providerStatus,
+    );
+  }
+
   getProviderIds() {
     return Object.keys(this.settings.providers || {});
   }
@@ -754,6 +782,10 @@ module.exports = class AgentChatPlugin extends Plugin {
     }
     await this.persist();
     await this.refreshOpenViews();
+    await this.syncProviderStatusToWorkflow().catch((error) => {
+      const message = error && error.message ? error.message : String(error);
+      new Notice(`同步 Agent 接入状态失败：${message}`);
+    });
   }
 
   async probeAllProviders() {
@@ -766,6 +798,10 @@ module.exports = class AgentChatPlugin extends Plugin {
       }
       await this.persist();
       await this.refreshOpenViews();
+      await this.syncProviderStatusToWorkflow().catch((error) => {
+        const message = error && error.message ? error.message : String(error);
+        new Notice(`同步 Agent 接入状态失败：${message}`);
+      });
       new Notice("手机端不能运行本地 CLI 检测");
       return;
     }
@@ -808,6 +844,10 @@ module.exports = class AgentChatPlugin extends Plugin {
     }));
     await this.persist();
     await this.refreshOpenViews();
+    await this.syncProviderStatusToWorkflow().catch((error) => {
+      const message = error && error.message ? error.message : String(error);
+      new Notice(`同步 Agent 接入状态失败：${message}`);
+    });
     new Notice("Agent 检测完成");
   }
 

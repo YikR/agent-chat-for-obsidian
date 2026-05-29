@@ -14,6 +14,7 @@ const { recordProviderResult, summarizeProviderStatus } = require("../src/provid
 const { renderSessionMarkdown } = require("../src/sessionExport");
 const { resolveWritebackTargets } = require("../src/writebackTargets");
 const { WORKFLOW_DEFAULTS, formatTaskBoardRow, insertTaskRow } = require("../src/workflowConfig");
+const { renderProviderStatusBlock, replaceOrAppendMarker, STATUS_MARKER } = require("../src/agentStatusBridge");
 
 test("createDefaultState returns a usable empty shell", () => {
   const state = createDefaultState();
@@ -378,7 +379,46 @@ test("workflow defaults point at the user's Obsidian workflow pages", () => {
   assert.equal(WORKFLOW_DEFAULTS.enabled, true);
   assert.equal(WORKFLOW_DEFAULTS.defaultProjectPath, "02-项目/Obsidian工作流/项目主页.md");
   assert.equal(WORKFLOW_DEFAULTS.taskBoardPath, "AI AGENTS/Agent任务板.md");
+  assert.equal(WORKFLOW_DEFAULTS.agentStatusPath, "AI AGENTS/接入状态.md");
   assert.ok(WORKFLOW_DEFAULTS.quickLinks.some((link) => link.label === "任务板"));
+});
+
+test("renderProviderStatusBlock creates a workflow-readable status table", () => {
+  const lines = renderProviderStatusBlock(
+    ["codex", "claude"],
+    {
+      codex: { label: "Codex", enabled: true },
+      claude: { label: "Claude", enabled: true },
+    },
+    {
+      codex: {
+        state: "ok",
+        checkedAt: "2026-05-29T07:10:00.000Z",
+        lastMessage: "OK",
+      },
+      claude: {
+        state: "error",
+        checkedAt: "2026-05-29T07:11:00.000Z",
+        lastError: "timeout",
+      },
+    },
+    { date: new Date("2026-05-29T07:12:00.000Z") },
+  );
+
+  const markdown = lines.join("\n");
+  assert.match(markdown, /## Agent Chat 检测状态/);
+  assert.match(markdown, /\| Codex \| ✅ 可用 \| 2026-05-29 07:10 \| OK \|/);
+  assert.match(markdown, /\| Claude \| ⚠️ 异常 \| 2026-05-29 07:11 \| timeout \|/);
+});
+
+test("replaceOrAppendMarker updates the Agent Chat provider status block", () => {
+  const original = "# Agent 接入状态\n\n旧内容\n";
+  const next = replaceOrAppendMarker(original, STATUS_MARKER, ["## Agent Chat 检测状态", "", "- 更新时间：x"]);
+  const updated = replaceOrAppendMarker(next, STATUS_MARKER, ["## Agent Chat 检测状态", "", "- 更新时间：y"]);
+
+  assert.match(next, /<!-- AGENT-CHAT:PROVIDER-STATUS:START -->/);
+  assert.match(updated, /- 更新时间：y/);
+  assert.doesNotMatch(updated, /- 更新时间：x/);
 });
 
 test("formatTaskBoardRow creates a dispatchable Agent task row", () => {
