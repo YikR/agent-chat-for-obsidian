@@ -13,6 +13,7 @@ const { buildExecutionEnv, createProbeSession, createSpawnSpec, resolveNativeSes
 const { recordProviderResult, summarizeProviderStatus } = require("../src/providerStatus");
 const { renderSessionMarkdown } = require("../src/sessionExport");
 const { resolveWritebackTargets } = require("../src/writebackTargets");
+const { writebackSessionResult } = require("../src/writeback");
 const { WORKFLOW_DEFAULTS, formatTaskBoardRow, insertTaskRow } = require("../src/workflowConfig");
 const { renderProviderStatusBlock, replaceOrAppendMarker, STATUS_MARKER } = require("../src/agentStatusBridge");
 
@@ -100,6 +101,52 @@ test("resolveWritebackTargets maps providers to latest pages and optional projec
     "AI AGENTS/产出/OpenClaw/OpenClaw 最近活动.md",
     "02-项目/Obsidian工作流/项目主页.md",
   ]);
+});
+
+test("writebackSessionResult extracts assistant text before writing JSON summaries", async () => {
+  const targetPath = "AI AGENTS/产出/OpenClaw/最新任务产出.md";
+  const files = new Map([[targetPath, "# OpenClaw 最新任务产出\n\n"]]);
+  const app = {
+    vault: {
+      getAbstractFileByPath(filePath) {
+        return files.has(filePath) ? { path: filePath } : null;
+      },
+      async createFolder() {},
+      async create(filePath, initialText) {
+        files.set(filePath, initialText);
+        return { path: filePath };
+      },
+      async read(file) {
+        return files.get(file.path);
+      },
+      async modify(file, nextText) {
+        files.set(file.path, nextText);
+      },
+    },
+  };
+  const session = createSession({
+    id: "session-openclaw-writeback",
+    providerId: "openclaw",
+    title: "你好",
+  });
+  const rawJson = JSON.stringify({
+    payloads: [
+      {
+        text: "你好！有什么可以帮你的吗？",
+      },
+    ],
+    meta: {
+      provider: "minimax",
+    },
+  }, null, 2);
+
+  const writes = await writebackSessionResult(app, "openclaw", session, rawJson, [targetPath]);
+  const written = files.get(targetPath);
+
+  assert.deepEqual(writes, [targetPath]);
+  assert.match(written, /- 摘要：你好！有什么可以帮你的吗？/);
+  assert.doesNotMatch(written, /payloads/);
+  assert.doesNotMatch(written, /minimax/);
 });
 
 test("createSpawnSpec builds a codex exec command with stdin prompt", () => {

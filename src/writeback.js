@@ -9,8 +9,40 @@ function formatTime() {
   return new Date().toISOString().replace("T", " ").slice(0, 16);
 }
 
+function extractAssistantText(text) {
+  const raw = String(text || "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    const candidates = [
+      Array.isArray(parsed.payloads) ? parsed.payloads.map((payload) => payload && payload.text).filter(Boolean).join("\n") : "",
+      parsed.payload && parsed.payload.text,
+      parsed.final,
+      parsed.reply,
+      parsed.text,
+      parsed.message,
+      parsed.output,
+      parsed.result,
+      parsed.response,
+      parsed.assistant,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+  } catch (_error) {
+    // Non-JSON agent output is already the display text.
+  }
+
+  return raw;
+}
+
 function trimForSummary(text, max = 220) {
-  const normalized = String(text || "").replace(/\s+/g, " ").trim();
+  const normalized = extractAssistantText(text).replace(/\s+/g, " ").trim();
   if (normalized.length <= max) {
     return normalized;
   }
