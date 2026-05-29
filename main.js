@@ -124,11 +124,24 @@ class AgentChatView extends ItemView {
     }
 
     const actionRow = controlPanel.createDiv({ cls: "agent-chat-action-row" });
-    const sessionActions = actionRow.createDiv({ cls: "agent-chat-button-group" });
-    const workflowActions = actionRow.createDiv({ cls: "agent-chat-button-group" });
-    const outputActions = actionRow.createDiv({ cls: "agent-chat-button-group" });
+    const primaryActions = actionRow.createDiv({ cls: "agent-chat-button-group" });
+    const secondaryActions = actionRow.createEl("details", { cls: "agent-chat-more-actions" });
+    secondaryActions.createEl("summary", { text: "更多" });
+    const moreActions = secondaryActions.createDiv({ cls: "agent-chat-more-actions-menu" });
 
-    const bindCurrentButton = sessionActions.createEl("button", { text: "绑定当前笔记" });
+    const newTabButton = primaryActions.createEl("button", { text: "新会话" });
+    newTabButton.onclick = async () => {
+      this.plugin.createTab(session.providerId);
+      await this.render();
+    };
+
+    const probeAllButton = primaryActions.createEl("button", { text: "检测全部 Agent" });
+    probeAllButton.onclick = async () => {
+      await this.plugin.probeAllProviders();
+      await this.render();
+    };
+
+    const bindCurrentButton = moreActions.createEl("button", { text: "绑定当前笔记" });
     bindCurrentButton.onclick = async () => {
       const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
       const file = activeView == null ? void 0 : activeView.file;
@@ -137,42 +150,35 @@ class AgentChatView extends ItemView {
         return;
       }
       this.plugin.setProjectPath(file.path);
+      secondaryActions.removeAttribute("open");
       await this.render();
       await this.plugin.persist();
     };
 
-    const newTabButton = sessionActions.createEl("button", { text: "新会话" });
-    newTabButton.onclick = async () => {
-      this.plugin.createTab(session.providerId);
-      await this.render();
-    };
-
-    const probeAllButton = workflowActions.createEl("button", { text: "检测全部 Agent" });
-    probeAllButton.onclick = async () => {
-      await this.plugin.probeAllProviders();
-      await this.render();
-    };
-
-    const dispatchButton = workflowActions.createEl("button", { text: "派单到任务板" });
+    const dispatchButton = moreActions.createEl("button", { text: "派单到任务板" });
     dispatchButton.onclick = async () => {
       await this.plugin.dispatchActiveSessionToTaskBoard();
+      secondaryActions.removeAttribute("open");
     };
 
-    const writebackButton = outputActions.createEl("button", { text: "写回" });
+    const writebackButton = moreActions.createEl("button", { text: "写回" });
     writebackButton.onclick = async () => {
       await this.plugin.writebackActiveSession();
+      secondaryActions.removeAttribute("open");
       await this.render();
     };
 
-    const exportButton = outputActions.createEl("button", { text: "导出" });
+    const exportButton = moreActions.createEl("button", { text: "导出" });
     exportButton.onclick = async () => {
       await this.plugin.exportActiveSession();
+      secondaryActions.removeAttribute("open");
     };
 
-    const stopButton = outputActions.createEl("button", { text: "停止" });
+    const stopButton = moreActions.createEl("button", { text: "停止" });
     stopButton.disabled = !isRunning;
     stopButton.onclick = () => {
       this.plugin.stopActiveRun();
+      secondaryActions.removeAttribute("open");
     };
 
     const tabsBar = container.createDiv({ cls: "agent-chat-tabs" });
