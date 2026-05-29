@@ -76,18 +76,10 @@ class AgentChatView extends ItemView {
       }
     }
 
-    const header = container.createDiv({ cls: "agent-chat-header" });
-    if (this.plugin.settings.obsidianWorkflow.enabled) {
-      const workflowBar = container.createDiv({ cls: "agent-chat-workflowbar" });
-      for (const link of this.plugin.settings.obsidianWorkflow.quickLinks) {
-        const button = workflowBar.createEl("button", { text: link.label });
-        button.onclick = async () => {
-          await this.plugin.openWorkflowNote(link.path);
-        };
-      }
-    }
+    const controlPanel = container.createDiv({ cls: "agent-chat-controlpanel" });
+    const contextRow = controlPanel.createDiv({ cls: "agent-chat-context-row" });
 
-    const providerSelect = header.createEl("select", { cls: "agent-chat-provider" });
+    const providerSelect = contextRow.createEl("select", { cls: "agent-chat-provider" });
     for (const providerId of Object.keys(this.plugin.settings.providers)) {
       const option = providerSelect.createEl("option", { text: this.plugin.providerLabel(providerId) });
       option.value = providerId;
@@ -98,18 +90,7 @@ class AgentChatView extends ItemView {
       await this.render();
     };
 
-    const projectInput = header.createEl("input", {
-      cls: "agent-chat-project",
-      type: "text",
-      placeholder: "绑定项目页路径，例如 02-项目/Obsidian工作流/项目主页.md",
-      value: session.projectPath || "",
-    });
-    projectInput.onchange = async () => {
-      this.plugin.setProjectPath(projectInput.value.trim());
-      await this.plugin.persist();
-    };
-
-    const titleInput = header.createEl("input", {
+    const titleInput = contextRow.createEl("input", {
       cls: "agent-chat-title",
       type: "text",
       placeholder: "会话标题",
@@ -121,7 +102,33 @@ class AgentChatView extends ItemView {
       await this.render();
     };
 
-    const bindCurrentButton = header.createEl("button", { text: "绑定当前笔记" });
+    const projectInput = contextRow.createEl("input", {
+      cls: "agent-chat-project",
+      type: "text",
+      placeholder: "绑定项目页路径，例如 02-项目/Obsidian工作流/项目主页.md",
+      value: session.projectPath || "",
+    });
+    projectInput.onchange = async () => {
+      this.plugin.setProjectPath(projectInput.value.trim());
+      await this.plugin.persist();
+    };
+
+    if (this.plugin.settings.obsidianWorkflow.enabled) {
+      const workflowBar = controlPanel.createDiv({ cls: "agent-chat-workflowbar" });
+      for (const link of this.plugin.settings.obsidianWorkflow.quickLinks) {
+        const button = workflowBar.createEl("button", { text: link.label });
+        button.onclick = async () => {
+          await this.plugin.openWorkflowNote(link.path);
+        };
+      }
+    }
+
+    const actionRow = controlPanel.createDiv({ cls: "agent-chat-action-row" });
+    const sessionActions = actionRow.createDiv({ cls: "agent-chat-button-group" });
+    const workflowActions = actionRow.createDiv({ cls: "agent-chat-button-group" });
+    const outputActions = actionRow.createDiv({ cls: "agent-chat-button-group" });
+
+    const bindCurrentButton = sessionActions.createEl("button", { text: "绑定当前笔记" });
     bindCurrentButton.onclick = async () => {
       const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
       const file = activeView == null ? void 0 : activeView.file;
@@ -134,35 +141,35 @@ class AgentChatView extends ItemView {
       await this.plugin.persist();
     };
 
-    const newTabButton = header.createEl("button", { text: "新会话" });
+    const newTabButton = sessionActions.createEl("button", { text: "新会话" });
     newTabButton.onclick = async () => {
       this.plugin.createTab(session.providerId);
       await this.render();
     };
 
-    const probeAllButton = header.createEl("button", { text: "检测全部 Agent" });
+    const probeAllButton = workflowActions.createEl("button", { text: "检测全部 Agent" });
     probeAllButton.onclick = async () => {
       await this.plugin.probeAllProviders();
       await this.render();
     };
 
-    const dispatchButton = header.createEl("button", { text: "派单到任务板" });
+    const dispatchButton = workflowActions.createEl("button", { text: "派单到任务板" });
     dispatchButton.onclick = async () => {
       await this.plugin.dispatchActiveSessionToTaskBoard();
     };
 
-    const writebackButton = header.createEl("button", { text: "写回" });
+    const writebackButton = outputActions.createEl("button", { text: "写回" });
     writebackButton.onclick = async () => {
       await this.plugin.writebackActiveSession();
       await this.render();
     };
 
-    const exportButton = header.createEl("button", { text: "导出" });
+    const exportButton = outputActions.createEl("button", { text: "导出" });
     exportButton.onclick = async () => {
       await this.plugin.exportActiveSession();
     };
 
-    const stopButton = header.createEl("button", { text: "停止" });
+    const stopButton = outputActions.createEl("button", { text: "停止" });
     stopButton.disabled = !isRunning;
     stopButton.onclick = () => {
       this.plugin.stopActiveRun();
