@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 
 const {
   createDefaultState,
@@ -222,4 +223,11 @@ test("renderSessionMarkdown exports a readable Chinese transcript", () => {
   assert.match(markdown, /## 对话记录/);
   assert.match(markdown, /\*\*用户\*\*：先列结构/);
   assert.match(markdown, /\*\*助手\*\*：可以分成三层。/);
+});
+
+test("release bundle does not depend on source files at runtime", () => {
+  const bundle = fs.readFileSync("dist/main.js", "utf8");
+
+  assert.doesNotMatch(bundle, /require\(["']\.\/src\//);
+  assert.match(bundle, /__agentChatRequire/);
 });

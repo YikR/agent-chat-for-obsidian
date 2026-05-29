@@ -80,6 +80,18 @@ ln -sfn /Users/yanyunuo/agent-chat-for-obsidian \
 
 ## 开发验证
 
+生成 BRAT/Obsidian 发布包：
+
+```bash
+npm run build
+```
+
+构建产物会写入 `dist/`：
+
+- `dist/main.js`
+- `dist/manifest.json`
+- `dist/styles.css`
+
 运行核心测试：
 
 ```bash
@@ -94,6 +106,7 @@ node --check src/providers.js
 node --check src/writeback.js
 node --check src/providerStatus.js
 node --check src/sessionExport.js
+node --check dist/main.js
 ```
 
 ## 安全提醒
