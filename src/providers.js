@@ -40,6 +40,37 @@ const DEFAULT_PROVIDER_SETTINGS = {
   },
 };
 
+function uniquePaths(paths) {
+  const seen = new Set();
+  return paths.filter((item) => {
+    if (!item || seen.has(item)) {
+      return false;
+    }
+    seen.add(item);
+    return true;
+  });
+}
+
+function buildExecutionEnv(baseEnv = process.env) {
+  const home = baseEnv.HOME || os.homedir();
+  const basePath = baseEnv.PATH || "";
+  const extraPaths = [
+    path.join(home, ".local", "bin"),
+    path.join(home, ".local", "nodejs-v22.22.2", "bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+  ];
+
+  return {
+    ...baseEnv,
+    PATH: uniquePaths([...extraPaths, ...basePath.split(path.delimiter)]).join(path.delimiter),
+  };
+}
+
 function splitArgs(text) {
   return String(text || "")
     .split(/\s+/)
@@ -172,7 +203,7 @@ function runSpawnSpec(spec, timeoutMs, options = {}) {
     const child = spawn(spec.cliPath, spec.args, {
       cwd: spec.cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: buildExecutionEnv(process.env),
     });
     if (typeof options.onSpawn === "function") {
       options.onSpawn(child);
@@ -261,6 +292,7 @@ async function probeProvider(providerId, settings, options = {}) {
 
 module.exports = {
   DEFAULT_PROVIDER_SETTINGS,
+  buildExecutionEnv,
   createProbeSession,
   createSpawnSpec,
   getProviderConfig,

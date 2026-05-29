@@ -25,6 +25,7 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - 支持把当前会话导出为 Markdown 记录
 - 显示每个 provider 的最近状态：未检测、运行中、可用、异常、已停用
 - 支持一键检测全部 Agent，并把真实调用结果写入状态条
+- 自动为 Obsidian GUI 进程补充常见本地 CLI 路径，避免终端可用但插件找不到命令
 - 设置页可配置每个 provider 的 CLI 路径、工作目录、额外参数和启用状态
 
 ## 当前边界

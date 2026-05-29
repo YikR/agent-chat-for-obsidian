@@ -1,5 +1,10 @@
 # 变更记录
 
+## 0.2.3 - 2026-05-29
+
+- 修复 Obsidian GUI 环境中 `Codex / Claude / Hermes / OpenClaw` 全部显示异常的问题。
+- 子进程启动时会自动补充常见本地 CLI 路径，包括 `~/.local/bin`、`~/.local/nodejs-v22.22.2/bin`、`/opt/homebrew/bin` 和 `/usr/local/bin`。
+
 ## 0.2.2 - 2026-05-29
 
 - 新增 `检测全部 Agent` 按钮和命令。

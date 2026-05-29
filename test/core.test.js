@@ -8,7 +8,7 @@ const {
   upsertMessage,
 } = require("../src/sessionRegistry");
 const { buildPromptFromSession } = require("../src/promptCompiler");
-const { createProbeSession, createSpawnSpec } = require("../src/providers");
+const { buildExecutionEnv, createProbeSession, createSpawnSpec } = require("../src/providers");
 const { recordProviderResult, summarizeProviderStatus } = require("../src/providerStatus");
 const { renderSessionMarkdown } = require("../src/sessionExport");
 const { resolveWritebackTargets } = require("../src/writebackTargets");
@@ -200,6 +200,19 @@ test("createSpawnSpec can build a lightweight provider probe", () => {
 
   assert.match(spec.stdin, /当前会话标题：Agent 可用性检测/);
   assert.match(spec.stdin, /当前输入：Reply with exactly: OK/);
+});
+
+test("buildExecutionEnv extends GUI PATH with local agent command directories", () => {
+  const env = buildExecutionEnv({
+    HOME: "/Users/example",
+    PATH: "/usr/bin:/bin",
+  });
+
+  assert.match(env.PATH, /\/Users\/example\/\.local\/bin/);
+  assert.match(env.PATH, /\/Users\/example\/\.local\/nodejs-v22\.22\.2\/bin/);
+  assert.match(env.PATH, /\/opt\/homebrew\/bin/);
+  assert.match(env.PATH, /\/usr\/local\/bin/);
+  assert.match(env.PATH, /\/usr\/bin:\/bin/);
 });
 
 test("recordProviderResult stores success and failure status by provider", () => {
