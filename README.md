@@ -36,6 +36,7 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - 工作流快捷入口默认折叠，需要时展开
 - 发送消息后会立即刷新对话区，provider 在后台继续运行
 - 助手回复会先显示占位，并在支持 stdout 流的 provider 上增量刷新
+- 对话区重绘后自动停留在最新消息，避免每轮回复后跳回顶部
 - 自动写回和手动写回进入后台队列，不阻塞对话区最终结果显示
 - 支持 provider 原生续接：OpenClaw 固定 `session-key`，Claude 固定 `session-id`，Hermes 固定 `--continue` 会话名
 - `检测全部 Agent` 会并行检测，减少等待时间
@@ -48,9 +49,9 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 在当前实现机器上的首轮冒烟结果：
 
 - `Codex`：受本地 app-server 权限初始化阻塞
-- `OpenClaw`：受当前环境 DNS/联网限制影响
+- `OpenClaw`：非沙盒环境下最小调用可返回 JSON；插件已支持从 `payloads[].text` 提取回复
 - `Hermes`：这轮没有形成可用助手返回
-- `Claude`：仍需要在真实 Obsidian 运行环境里确认
+- `Claude`：当前本机 `claude -p` 直接调用会长时间无返回，需要单独联调 Claude CLI 运行态
 
 因此当前结论是：插件已经可安装、可打开、可管理会话；四个 provider 的本机运行链还需要逐个联调。
 

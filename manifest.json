@@ -1,7 +1,7 @@
 {
   "id": "agent-chat-for-obsidian",
   "name": "Agent Chat",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "minAppVersion": "1.7.2",
   "description": "在 Obsidian 中统一接入 Codex、Claude、Hermes 和 OpenClaw 的持续对话工作台。",
   "author": "YikR",

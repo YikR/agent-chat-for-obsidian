@@ -197,6 +197,36 @@ test("createSpawnSpec builds an openclaw local agent command", () => {
   assert.match(spec.args.at(-1), /当前输入：plan next move/);
 });
 
+test("openclaw output parser extracts payload text from json result", () => {
+  const session = createSession({
+    id: "session-openclaw-json",
+    providerId: "openclaw",
+    title: "OpenClaw thread",
+  });
+  const spec = createSpawnSpec("openclaw", session, "probe", {
+    providers: {
+      openclaw: {
+        cliPath: "openclaw",
+        cwd: "/tmp/openclaw",
+        timeoutMs: 1000,
+        extraArgs: "",
+      },
+    },
+  });
+  const raw = JSON.stringify({
+    payloads: [
+      {
+        text: "OKOK",
+      },
+    ],
+    meta: {
+      provider: "minimax",
+    },
+  });
+
+  assert.equal(spec.outputParser(raw), "OKOK");
+});
+
 test("createSpawnSpec can disable native resume and include bounded history", () => {
   const session = createSession({
     id: "session-claude-no-native",

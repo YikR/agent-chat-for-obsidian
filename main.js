@@ -62,6 +62,18 @@ class AgentChatView extends ItemView {
     this.contentEl.empty();
   }
 
+  scrollTranscriptToBottom(transcript) {
+    const run = () => {
+      transcript.scrollTop = transcript.scrollHeight;
+      this.contentEl.scrollTop = this.contentEl.scrollHeight;
+    };
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(run);
+      return;
+    }
+    setTimeout(run, 0);
+  }
+
   async render() {
     const container = this.contentEl;
     container.empty();
@@ -261,6 +273,8 @@ class AgentChatView extends ItemView {
       void this.plugin.sendMessageToActiveSession(value);
       await this.render();
     };
+
+    this.scrollTranscriptToBottom(transcript);
   }
 }
 

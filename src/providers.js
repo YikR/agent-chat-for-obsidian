@@ -91,6 +91,8 @@ function extractOpenClawText(raw) {
   try {
     const parsed = JSON.parse(raw);
     const candidates = [
+      Array.isArray(parsed.payloads) ? parsed.payloads.map((payload) => payload && payload.text).filter(Boolean).join("\n") : "",
+      parsed.payload && parsed.payload.text,
       parsed.final,
       parsed.reply,
       parsed.text,
