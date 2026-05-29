@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 
 const { buildPromptFromSession } = require("./promptCompiler");
@@ -13,6 +14,7 @@ const DEFAULT_PROVIDER_SETTINGS = {
     cwd: "",
     timeoutMs: 10 * 60 * 1000,
     extraArgs: "",
+    nativeResume: true,
   },
   claude: {
     enabled: true,
@@ -21,6 +23,7 @@ const DEFAULT_PROVIDER_SETTINGS = {
     cwd: "",
     timeoutMs: 10 * 60 * 1000,
     extraArgs: "",
+    nativeResume: true,
   },
   hermes: {
     enabled: true,
@@ -29,6 +32,7 @@ const DEFAULT_PROVIDER_SETTINGS = {
     cwd: "",
     timeoutMs: 10 * 60 * 1000,
     extraArgs: "",
+    nativeResume: true,
   },
   openclaw: {
     enabled: true,
@@ -37,6 +41,7 @@ const DEFAULT_PROVIDER_SETTINGS = {
     cwd: "",
     timeoutMs: 10 * 60 * 1000,
     extraArgs: "",
+    nativeResume: true,
   },
 };
 
@@ -110,26 +115,103 @@ function extractOpenClawText(raw) {
   return raw.trim();
 }
 
+function stableUuid(seed) {
+  const hash = crypto.createHash("sha256").update(seed).digest("hex");
+  return [
+    hash.slice(0, 8),
+    hash.slice(8, 12),
+    `5${hash.slice(13, 16)}`,
+    ((parseInt(hash.slice(16, 18), 16) & 0x3f) | 0x80).toString(16).padStart(2, "0") + hash.slice(18, 20),
+    hash.slice(20, 32),
+  ].join("-");
+}
+
+function ensureNativeSessions(session) {
+  if (!session.nativeSessions || typeof session.nativeSessions !== "object") {
+    session.nativeSessions = {};
+  }
+  return session.nativeSessions;
+}
+
+function resolveNativeSession(providerId, session) {
+  const nativeSessions = ensureNativeSessions(session);
+  if (providerId === "claude") {
+    nativeSessions.claude = {
+      ...nativeSessions.claude,
+      sessionId: (nativeSessions.claude || {}).sessionId || stableUuid(`agent-chat:${session.id}:claude`),
+    };
+    return nativeSessions.claude;
+  }
+  if (providerId === "hermes") {
+    nativeSessions.hermes = {
+      ...nativeSessions.hermes,
+      sessionName: (nativeSessions.hermes || {}).sessionName || `agent-chat-${session.id}`,
+    };
+    return nativeSessions.hermes;
+  }
+  if (providerId === "openclaw") {
+    nativeSessions.openclaw = {
+      ...nativeSessions.openclaw,
+      sessionKey: (nativeSessions.openclaw || {}).sessionKey || `agent:main:plugin-${session.id}`,
+    };
+    return nativeSessions.openclaw;
+  }
+  if (providerId === "codex") {
+    return nativeSessions.codex || {};
+  }
+  return {};
+}
+
+function shouldUseNativeResume(providerId, session, config) {
+  if (!config.nativeResume) {
+    return false;
+  }
+  if (providerId === "codex") {
+    const nativeSession = resolveNativeSession(providerId, session);
+    return Boolean(nativeSession.sessionId || nativeSession.threadName);
+  }
+  return providerId === "claude" || providerId === "hermes" || providerId === "openclaw";
+}
+
+function passthroughStreamChunk(chunk) {
+  return String(chunk || "");
+}
+
 function createSpawnSpec(providerId, session, userInput, settings, options = {}) {
   const config = getProviderConfig(settings, providerId);
   const cwd = config.cwd || options.cwd || process.cwd();
+  const nativeResume = shouldUseNativeResume(providerId, session, config);
   const prompt = buildPromptFromSession(session, userInput, {
-    maxHistoryMessages: 8,
+    maxHistoryMessages: nativeResume ? 0 : 8,
   });
   const extraArgs = splitArgs(config.extraArgs);
 
   if (providerId === "codex") {
     const outputFile = path.join(os.tmpdir(), `agent-chat-codex-${Date.now()}.txt`);
+    const nativeSession = resolveNativeSession(providerId, session);
+    const resumeTarget = nativeSession.sessionId || nativeSession.threadName;
+    const args = resumeTarget
+      ? [
+          "exec",
+          "resume",
+          "--skip-git-repo-check",
+          "--output-last-message",
+          outputFile,
+          ...extraArgs,
+          resumeTarget,
+          "-",
+        ]
+      : [
+          "exec",
+          "--skip-git-repo-check",
+          "--output-last-message",
+          outputFile,
+          ...extraArgs,
+          "-",
+        ];
     return {
       cliPath: config.cliPath,
-      args: [
-        "exec",
-        "--skip-git-repo-check",
-        "--output-last-message",
-        outputFile,
-        ...extraArgs,
-        "-",
-      ],
+      args,
       cwd,
       stdin: prompt,
       outputFile,
@@ -143,26 +225,43 @@ function createSpawnSpec(providerId, session, userInput, settings, options = {})
   }
 
   if (providerId === "claude") {
+    const nativeSession = resolveNativeSession(providerId, session);
     return {
       cliPath: config.cliPath,
-      args: ["-p", "--output-format", "text", ...extraArgs, prompt],
+      args: [
+        "-p",
+        "--output-format",
+        "text",
+        ...(nativeResume ? ["--session-id", nativeSession.sessionId] : []),
+        ...extraArgs,
+        prompt,
+      ],
       cwd,
       stdin: null,
       outputParser: (stdout) => stdout.trim(),
+      streamParser: passthroughStreamChunk,
     };
   }
 
   if (providerId === "hermes") {
+    const nativeSession = resolveNativeSession(providerId, session);
     return {
       cliPath: config.cliPath,
-      args: ["--oneshot", prompt, ...extraArgs],
+      args: [
+        ...(nativeResume ? ["--continue", nativeSession.sessionName] : []),
+        "--oneshot",
+        prompt,
+        ...extraArgs,
+      ],
       cwd,
       stdin: null,
       outputParser: (stdout) => stdout.trim(),
+      streamParser: passthroughStreamChunk,
     };
   }
 
   if (providerId === "openclaw") {
+    const nativeSession = resolveNativeSession(providerId, session);
     return {
       cliPath: config.cliPath,
       args: [
@@ -170,7 +269,7 @@ function createSpawnSpec(providerId, session, userInput, settings, options = {})
         "--local",
         "--json",
         "--session-key",
-        `agent:main:plugin-${session.id}`,
+        nativeSession.sessionKey,
         "--message",
         prompt,
         ...extraArgs,
@@ -223,11 +322,19 @@ function runSpawnSpec(spec, timeoutMs, options = {}) {
     }, timeoutMs);
 
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
+      const text = chunk.toString();
+      stdout += text;
+      if (typeof options.onStdout === "function") {
+        options.onStdout(text, stdout, spec);
+      }
     });
 
     child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
+      const text = chunk.toString();
+      stderr += text;
+      if (typeof options.onStderr === "function") {
+        options.onStderr(text, stderr, spec);
+      }
     });
 
     child.on("error", (error) => {
@@ -297,5 +404,6 @@ module.exports = {
   createSpawnSpec,
   getProviderConfig,
   probeProvider,
+  resolveNativeSession,
   runProviderTurn,
 };

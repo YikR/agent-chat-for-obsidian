@@ -1,5 +1,13 @@
 # 变更记录
 
+## 0.4.0 - 2026-05-29
+
+- 新增后台写回队列：自动写回和手动写回不再阻塞对话最终显示。
+- 新增流式输出占位：发送后立即显示助手消息，并在支持 stdout 流的 provider 上增量更新。
+- 新增 provider 原生续接开关，默认启用。
+- OpenClaw 使用固定 `session-key` 续接；Claude 使用固定 `session-id`；Hermes 使用固定会话名 `--continue`。
+- Codex 支持已有 `sessionId/threadName` 时使用 `codex exec resume`，否则继续使用插件历史 prompt 兜底。
+
 ## 0.3.4 - 2026-05-29
 
 - 将工作流快捷入口改为折叠区块，默认不展开。

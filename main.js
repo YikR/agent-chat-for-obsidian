@@ -1,6 +1,6 @@
 const { Plugin, ItemView, PluginSettingTab, Setting, Notice, MarkdownView } = require("obsidian");
 
-const { createDefaultState, createSession, upsertMessage } = require("./src/sessionRegistry");
+const { createDefaultState, createSession, updateMessageContent, upsertMessage } = require("./src/sessionRegistry");
 const { DEFAULT_PROVIDER_SETTINGS, probeProvider, runProviderTurn } = require("./src/providers");
 const { makeSessionExportPath, renderSessionMarkdown } = require("./src/sessionExport");
 const { markProviderRunning, recordProviderResult, summarizeProviderStatus } = require("./src/providerStatus");
@@ -14,9 +14,21 @@ function cloneProviderSettings() {
   return JSON.parse(JSON.stringify(DEFAULT_PROVIDER_SETTINGS));
 }
 
+function mergeProviderSettings(savedProviders = {}) {
+  const defaults = cloneProviderSettings();
+  const merged = {};
+  for (const providerId of Object.keys(defaults)) {
+    merged[providerId] = {
+      ...defaults[providerId],
+      ...((savedProviders || {})[providerId] || {}),
+    };
+  }
+  return merged;
+}
+
 function createDefaultSettings() {
   return {
-    providers: cloneProviderSettings(),
+    providers: mergeProviderSettings(),
     defaultPlacement: "right",
     autoWriteback: true,
     obsidianWorkflow: { ...WORKFLOW_DEFAULTS },
@@ -304,6 +316,16 @@ class AgentChatSettingTab extends PluginSettingTab {
         });
 
       new Setting(containerEl)
+        .setName(`${this.plugin.providerLabel(providerId)} 原生续接`)
+        .setDesc("优先使用 CLI 自带 session/resume 能力；不可用时仍使用会话历史 prompt 兜底。")
+        .addToggle((toggle) => {
+          toggle.setValue(provider.nativeResume !== false).onChange(async (value) => {
+            provider.nativeResume = value;
+            await this.plugin.persist();
+          });
+        });
+
+      new Setting(containerEl)
         .setName(`${this.plugin.providerLabel(providerId)} CLI 路径`)
         .addText((text) => {
           text.setValue(provider.cliPath).onChange(async (value) => {
@@ -340,6 +362,8 @@ module.exports = class AgentChatPlugin extends Plugin {
     this.state = createDefaultState();
     this.settings = createDefaultSettings();
     this.running = new Map();
+    this.writebackQueue = [];
+    this.writebackProcessing = false;
 
     await this.restore();
 
@@ -378,8 +402,7 @@ module.exports = class AgentChatPlugin extends Plugin {
       ...createDefaultSettings(),
       ...(saved.settings || {}),
       providers: {
-        ...cloneProviderSettings(),
-        ...((saved.settings || {}).providers || {}),
+        ...mergeProviderSettings((saved.settings || {}).providers || {}),
       },
       obsidianWorkflow: {
         ...WORKFLOW_DEFAULTS,
@@ -523,16 +546,61 @@ module.exports = class AgentChatPlugin extends Plugin {
       new Notice("当前会话还没有可写回的助手回复");
       return;
     }
-    const targets = resolveWritebackTargets(session.providerId, session.projectPath);
-    session.lastWriteback = await writebackSessionResult(
-      this.app,
-      session.providerId,
-      session,
-      lastAssistant.content,
-      targets,
-    );
+    this.enqueueWriteback(session.providerId, session.id, lastAssistant.content);
     await this.persist();
-    new Notice("已写回 Obsidian");
+    new Notice("已加入 Obsidian 写回队列");
+  }
+
+  enqueueWriteback(providerId, sessionId, assistantText) {
+    const session = this.state.sessions[sessionId];
+    if (!session) {
+      return;
+    }
+    this.writebackQueue.push({
+      id: makeId("writeback"),
+      providerId,
+      sessionId,
+      assistantText,
+      sessionSnapshot: {
+        ...session,
+        messages: [...(session.messages || [])],
+        lastWriteback: [...(session.lastWriteback || [])],
+      },
+    });
+    void this.processWritebackQueue();
+  }
+
+  async processWritebackQueue() {
+    if (this.writebackProcessing) {
+      return;
+    }
+    this.writebackProcessing = true;
+    try {
+      while (this.writebackQueue.length) {
+        const job = this.writebackQueue.shift();
+        try {
+          const targets = resolveWritebackTargets(job.providerId, job.sessionSnapshot.projectPath);
+          const writes = await writebackSessionResult(
+            this.app,
+            job.providerId,
+            job.sessionSnapshot,
+            job.assistantText,
+            targets,
+          );
+          const liveSession = this.state.sessions[job.sessionId];
+          if (liveSession) {
+            liveSession.lastWriteback = writes;
+          }
+          await this.persist();
+          await this.refreshOpenViews();
+        } catch (error) {
+          const message = error && error.message ? error.message : String(error);
+          new Notice(`Obsidian 写回失败：${message}`);
+        }
+      }
+    } finally {
+      this.writebackProcessing = false;
+    }
   }
 
   async ensureFolderPath(folderPath) {
@@ -709,16 +777,39 @@ module.exports = class AgentChatPlugin extends Plugin {
     await this.persist();
     await this.refreshOpenViews();
 
+    let assistantMessage = null;
     try {
+      assistantMessage = upsertMessage(session, { role: "assistant", content: "正在生成…" });
+      let streamedText = "";
+      let lastStreamRefresh = 0;
+      await this.persist();
+      await this.refreshOpenViews();
+
       const result = await runProviderTurn(providerId, promptSession, userInput, this.settings, {
         cwd: this.app.vault.adapter.basePath,
         onSpawn: (child) => {
           this.running.set(session.id, child);
         },
+        onStdout: (chunk, _stdout, spec) => {
+          if (!spec || typeof spec.streamParser !== "function") {
+            return;
+          }
+          const nextChunk = spec.streamParser(chunk);
+          if (!nextChunk) {
+            return;
+          }
+          streamedText += nextChunk;
+          updateMessageContent(session, assistantMessage.id, streamedText);
+          const now = Date.now();
+          if (now - lastStreamRefresh > 250) {
+            lastStreamRefresh = now;
+            void this.refreshOpenViews();
+          }
+        },
       });
       this.running.delete(session.id);
-      const assistantText = result.assistantText;
-      upsertMessage(session, { role: "assistant", content: assistantText });
+      const assistantText = result.assistantText || streamedText || "(No response text returned)";
+      updateMessageContent(session, assistantMessage.id, assistantText);
       recordProviderResult(this.state.providerStatus, providerId, {
         ok: true,
         message: assistantText,
@@ -726,14 +817,7 @@ module.exports = class AgentChatPlugin extends Plugin {
       });
 
       if (this.settings.autoWriteback) {
-        const targets = resolveWritebackTargets(providerId, session.projectPath);
-        session.lastWriteback = await writebackSessionResult(
-          this.app,
-          providerId,
-          session,
-          assistantText,
-          targets,
-        );
+        this.enqueueWriteback(providerId, session.id, assistantText);
       }
 
       await this.persist();
@@ -741,7 +825,11 @@ module.exports = class AgentChatPlugin extends Plugin {
     } catch (error) {
       this.running.delete(session.id);
       const message = error && error.message ? error.message : String(error);
-      upsertMessage(session, { role: "assistant", content: `运行失败：${message}` });
+      if (assistantMessage) {
+        updateMessageContent(session, assistantMessage.id, `运行失败：${message}`);
+      } else {
+        upsertMessage(session, { role: "assistant", content: `运行失败：${message}` });
+      }
       recordProviderResult(this.state.providerStatus, providerId, {
         ok: false,
         message,

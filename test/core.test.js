@@ -5,10 +5,11 @@ const fs = require("node:fs");
 const {
   createDefaultState,
   createSession,
+  updateMessageContent,
   upsertMessage,
 } = require("../src/sessionRegistry");
 const { buildPromptFromSession } = require("../src/promptCompiler");
-const { buildExecutionEnv, createProbeSession, createSpawnSpec } = require("../src/providers");
+const { buildExecutionEnv, createProbeSession, createSpawnSpec, resolveNativeSession } = require("../src/providers");
 const { recordProviderResult, summarizeProviderStatus } = require("../src/providerStatus");
 const { renderSessionMarkdown } = require("../src/sessionExport");
 const { resolveWritebackTargets } = require("../src/writebackTargets");
@@ -35,6 +36,7 @@ test("createSession seeds provider, title, and writeback structure", () => {
   assert.equal(session.projectPath, "02-项目/Obsidian工作流/项目主页.md");
   assert.deepEqual(session.messages, []);
   assert.deepEqual(session.lastWriteback, []);
+  assert.deepEqual(session.nativeSessions, {});
 });
 
 test("upsertMessage appends ordered role content", () => {
@@ -44,12 +46,29 @@ test("upsertMessage appends ordered role content", () => {
     title: "Fix sync chain",
   });
 
-  upsertMessage(session, { role: "user", content: "first" });
-  upsertMessage(session, { role: "assistant", content: "second" });
+  const first = upsertMessage(session, { role: "user", content: "first" });
+  const second = upsertMessage(session, { role: "assistant", content: "second" });
 
   assert.equal(session.messages.length, 2);
+  assert.match(first.id, /^msg-/);
+  assert.match(second.id, /^msg-/);
   assert.equal(session.messages[0].role, "user");
   assert.equal(session.messages[1].content, "second");
+});
+
+test("updateMessageContent updates an existing assistant placeholder", () => {
+  const session = createSession({
+    id: "session-1",
+    providerId: "codex",
+    title: "Streaming",
+  });
+
+  const message = upsertMessage(session, { role: "assistant", content: "正在生成…" });
+  const updated = updateMessageContent(session, message.id, "partial answer");
+
+  assert.equal(updated.content, "partial answer");
+  assert.equal(session.messages[0].content, "partial answer");
+  assert.equal(updateMessageContent(session, "missing", "x"), null);
 });
 
 test("buildPromptFromSession includes bounded history and current project binding", () => {
@@ -126,11 +145,12 @@ test("createSpawnSpec builds a claude print command", () => {
 
   assert.equal(spec.cliPath, "claude");
   assert.deepEqual(spec.args.slice(0, 3), ["-p", "--output-format", "text"]);
+  assert.ok(spec.args.includes("--session-id"));
   assert.equal(spec.stdin, null);
   assert.match(spec.args.at(-1), /当前输入：summarize/);
 });
 
-test("createSpawnSpec builds a hermes oneshot command", () => {
+test("createSpawnSpec builds a hermes native continuation oneshot command", () => {
   const session = createSession({
     id: "session-hermes",
     providerId: "hermes",
@@ -149,8 +169,8 @@ test("createSpawnSpec builds a hermes oneshot command", () => {
   });
 
   assert.equal(spec.cliPath, "hermes");
-  assert.deepEqual(spec.args.slice(0, 2), ["--oneshot", spec.args[1]]);
-  assert.match(spec.args[1], /当前输入：check status/);
+  assert.deepEqual(spec.args.slice(0, 4), ["--continue", "agent-chat-session-hermes", "--oneshot", spec.args[3]]);
+  assert.match(spec.args[3], /当前输入：check status/);
 });
 
 test("createSpawnSpec builds an openclaw local agent command", () => {
@@ -175,6 +195,42 @@ test("createSpawnSpec builds an openclaw local agent command", () => {
   assert.deepEqual(spec.args.slice(0, 4), ["agent", "--local", "--json", "--session-key"]);
   assert.equal(spec.args[4], "agent:main:plugin-session-openclaw");
   assert.match(spec.args.at(-1), /当前输入：plan next move/);
+});
+
+test("createSpawnSpec can disable native resume and include bounded history", () => {
+  const session = createSession({
+    id: "session-claude-no-native",
+    providerId: "claude",
+    title: "Claude thread",
+  });
+  upsertMessage(session, { role: "user", content: "previous question" });
+
+  const spec = createSpawnSpec("claude", session, "summarize", {
+    providers: {
+      claude: {
+        cliPath: "claude",
+        cwd: "/tmp/claude",
+        timeoutMs: 1000,
+        extraArgs: "",
+        nativeResume: false,
+      },
+    },
+  });
+
+  assert.equal(spec.args.includes("--session-id"), false);
+  assert.match(spec.args.at(-1), /previous question/);
+});
+
+test("resolveNativeSession creates stable provider native ids", () => {
+  const session = createSession({
+    id: "session-native",
+    providerId: "openclaw",
+    title: "Native",
+  });
+
+  assert.match(resolveNativeSession("claude", session).sessionId, /^[0-9a-f-]{36}$/);
+  assert.equal(resolveNativeSession("hermes", session).sessionName, "agent-chat-session-native");
+  assert.equal(resolveNativeSession("openclaw", session).sessionKey, "agent:main:plugin-session-native");
 });
 
 test("createProbeSession returns a stable lightweight probe session", () => {

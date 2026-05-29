@@ -33,8 +33,11 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - 低频操作收进 `更多` 菜单，减少顶部按钮占用
 - 工作流快捷入口默认折叠，需要时展开
 - 发送消息后会立即刷新对话区，provider 在后台继续运行
+- 助手回复会先显示占位，并在支持 stdout 流的 provider 上增量刷新
+- 自动写回和手动写回进入后台队列，不阻塞对话区最终结果显示
+- 支持 provider 原生续接：OpenClaw 固定 `session-key`，Claude 固定 `session-id`，Hermes 固定 `--continue` 会话名
 - `检测全部 Agent` 会并行检测，减少等待时间
-- 设置页可配置每个 provider 的 CLI 路径、工作目录、额外参数和启用状态
+- 设置页可配置每个 provider 的 CLI 路径、工作目录、额外参数、原生续接和启用状态
 
 ## 当前边界
 
@@ -48,6 +51,19 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - `Claude`：仍需要在真实 Obsidian 运行环境里确认
 
 因此当前结论是：插件已经可安装、可打开、可管理会话；四个 provider 的本机运行链还需要逐个联调。
+
+### 原生续接说明
+
+插件默认优先使用 CLI 自带会话能力，减少重复塞入完整历史导致的上下文膨胀：
+
+| Agent | 续接方式 | 说明 |
+|---|---|---|
+| OpenClaw | `--session-key agent:main:plugin-<session-id>` | 每个插件会话固定一个 OpenClaw 原生 session key |
+| Claude | `--session-id <固定 UUID>` | 根据插件会话 ID 生成稳定 UUID |
+| Hermes | `--continue agent-chat-<session-id>` | 根据插件会话 ID 生成稳定会话名 |
+| Codex | `codex exec resume <sessionId/threadName>` | 仅在会话已有 Codex 原生 id/name 时使用；否则用插件历史 prompt 兜底 |
+
+如果某个 CLI 的原生续接在本机行为异常，可以在设置页关闭该 provider 的“原生续接”，插件会回到历史 prompt 模式。
 
 ## 本地安装
 
