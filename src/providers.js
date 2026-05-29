@@ -153,6 +153,20 @@ function createSpawnSpec(providerId, session, userInput, settings, options = {})
   throw new Error(`Unsupported provider: ${providerId}`);
 }
 
+function createProbeSession(providerId) {
+  const now = new Date().toISOString();
+  return {
+    id: `probe-${providerId}`,
+    providerId,
+    title: "Agent 可用性检测",
+    projectPath: "",
+    messages: [],
+    lastWriteback: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function runSpawnSpec(spec, timeoutMs, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(spec.cliPath, spec.args, {
@@ -230,9 +244,26 @@ async function runProviderTurn(providerId, session, userInput, settings, options
   };
 }
 
+async function probeProvider(providerId, settings, options = {}) {
+  const config = getProviderConfig(settings, providerId);
+  const session = createProbeSession(providerId);
+  return runProviderTurn(providerId, session, "Reply with exactly: OK", {
+    ...settings,
+    providers: {
+      ...((settings || {}).providers || {}),
+      [providerId]: {
+        ...config,
+        timeoutMs: Math.min(config.timeoutMs || 30000, options.timeoutMs || 30000),
+      },
+    },
+  }, options);
+}
+
 module.exports = {
   DEFAULT_PROVIDER_SETTINGS,
+  createProbeSession,
   createSpawnSpec,
   getProviderConfig,
+  probeProvider,
   runProviderTurn,
 };

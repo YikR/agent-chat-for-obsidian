@@ -24,6 +24,7 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - 支持手动写回和自动写回
 - 支持把当前会话导出为 Markdown 记录
 - 显示每个 provider 的最近状态：未检测、运行中、可用、异常、已停用
+- 支持一键检测全部 Agent，并把真实调用结果写入状态条
 - 设置页可配置每个 provider 的 CLI 路径、工作目录、额外参数和启用状态
 
 ## 当前边界
@@ -64,6 +65,9 @@ ln -sfn /Users/yanyunuo/agent-chat-for-obsidian \
 4. 在输入框中继续推进问题
 5. 需要沉淀时点击 `写回`
 6. 需要完整留档时点击 `导出`
+7. 如果状态显示 `未检测`，点击 `检测全部 Agent` 做一次轻量探测
+
+`检测全部 Agent` 会对每个启用的 provider 发起最小调用：`Reply with exactly: OK`。成功会标记为 `可用`，失败会标记为 `异常`，错误原因可通过状态提示查看。
 
 ## 写回规则
 

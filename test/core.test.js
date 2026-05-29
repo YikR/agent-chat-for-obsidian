@@ -8,7 +8,7 @@ const {
   upsertMessage,
 } = require("../src/sessionRegistry");
 const { buildPromptFromSession } = require("../src/promptCompiler");
-const { createSpawnSpec } = require("../src/providers");
+const { createProbeSession, createSpawnSpec } = require("../src/providers");
 const { recordProviderResult, summarizeProviderStatus } = require("../src/providerStatus");
 const { renderSessionMarkdown } = require("../src/sessionExport");
 const { resolveWritebackTargets } = require("../src/writebackTargets");
@@ -174,6 +174,32 @@ test("createSpawnSpec builds an openclaw local agent command", () => {
   assert.deepEqual(spec.args.slice(0, 4), ["agent", "--local", "--json", "--session-key"]);
   assert.equal(spec.args[4], "agent:main:plugin-session-openclaw");
   assert.match(spec.args.at(-1), /当前输入：plan next move/);
+});
+
+test("createProbeSession returns a stable lightweight probe session", () => {
+  const session = createProbeSession("hermes");
+
+  assert.equal(session.id, "probe-hermes");
+  assert.equal(session.providerId, "hermes");
+  assert.equal(session.title, "Agent 可用性检测");
+  assert.deepEqual(session.messages, []);
+});
+
+test("createSpawnSpec can build a lightweight provider probe", () => {
+  const session = createProbeSession("codex");
+  const spec = createSpawnSpec("codex", session, "Reply with exactly: OK", {
+    providers: {
+      codex: {
+        cliPath: "codex",
+        cwd: "/tmp/codex",
+        timeoutMs: 1000,
+        extraArgs: "",
+      },
+    },
+  });
+
+  assert.match(spec.stdin, /当前会话标题：Agent 可用性检测/);
+  assert.match(spec.stdin, /当前输入：Reply with exactly: OK/);
 });
 
 test("recordProviderResult stores success and failure status by provider", () => {

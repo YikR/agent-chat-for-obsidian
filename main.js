@@ -1,7 +1,7 @@
 const { Plugin, ItemView, PluginSettingTab, Setting, Notice, MarkdownView } = require("obsidian");
 
 const { createDefaultState, createSession, upsertMessage } = require("./src/sessionRegistry");
-const { DEFAULT_PROVIDER_SETTINGS, runProviderTurn } = require("./src/providers");
+const { DEFAULT_PROVIDER_SETTINGS, probeProvider, runProviderTurn } = require("./src/providers");
 const { makeSessionExportPath, renderSessionMarkdown } = require("./src/sessionExport");
 const { markProviderRunning, recordProviderResult, summarizeProviderStatus } = require("./src/providerStatus");
 const { resolveWritebackTargets } = require("./src/writebackTargets");
@@ -124,6 +124,12 @@ class AgentChatView extends ItemView {
     const newTabButton = header.createEl("button", { text: "新会话" });
     newTabButton.onclick = async () => {
       this.plugin.createTab(session.providerId);
+      await this.render();
+    };
+
+    const probeAllButton = header.createEl("button", { text: "检测全部 Agent" });
+    probeAllButton.onclick = async () => {
+      await this.plugin.probeAllProviders();
       await this.render();
     };
 
@@ -280,6 +286,13 @@ module.exports = class AgentChatPlugin extends Plugin {
       name: "打开 Agent 对话",
       callback: async () => {
         await this.activateView();
+      },
+    });
+    this.addCommand({
+      id: "probe-all-agent-chat-providers",
+      name: "检测全部 Agent 状态",
+      callback: async () => {
+        await this.probeAllProviders();
       },
     });
     this.addSettingTab(new AgentChatSettingTab(this.app, this));
@@ -471,6 +484,62 @@ module.exports = class AgentChatPlugin extends Plugin {
       await this.app.vault.create(filePath, markdown);
     }
     new Notice(`已导出会话：${filePath}`);
+  }
+
+  getProviderIds() {
+    return Object.keys(this.settings.providers || {});
+  }
+
+  async refreshOpenViews() {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_AGENT_CHAT);
+    for (const leaf of leaves) {
+      if (leaf.view && typeof leaf.view.render === "function") {
+        await leaf.view.render();
+      }
+    }
+  }
+
+  async probeOneProvider(providerId) {
+    const provider = this.settings.providers[providerId];
+    if (!provider || !provider.enabled) {
+      recordProviderResult(this.state.providerStatus, providerId, {
+        ok: false,
+        message: "该 Agent 已在设置中停用",
+      });
+      await this.persist();
+      return;
+    }
+
+    markProviderRunning(this.state.providerStatus, providerId);
+    await this.persist();
+    await this.refreshOpenViews();
+
+    try {
+      const result = await probeProvider(providerId, this.settings, {
+        cwd: this.app.vault.adapter.basePath,
+        timeoutMs: 30000,
+      });
+      recordProviderResult(this.state.providerStatus, providerId, {
+        ok: true,
+        message: result.assistantText,
+        command: result.command,
+      });
+    } catch (error) {
+      recordProviderResult(this.state.providerStatus, providerId, {
+        ok: false,
+        message: error && error.message ? error.message : String(error),
+      });
+    }
+    await this.persist();
+    await this.refreshOpenViews();
+  }
+
+  async probeAllProviders() {
+    new Notice("开始检测全部 Agent");
+    for (const providerId of this.getProviderIds()) {
+      await this.probeOneProvider(providerId);
+    }
+    new Notice("Agent 检测完成");
   }
 
   async sendMessageToActiveSession(userInput) {
