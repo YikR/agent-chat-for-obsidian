@@ -12,6 +12,7 @@ const MODULES = [
   ["./src/providerStatus", "src/providerStatus.js"],
   ["./src/writebackTargets", "src/writebackTargets.js"],
   ["./src/writeback", "src/writeback.js"],
+  ["./src/workflowConfig", "src/workflowConfig.js"],
   ["./src/promptCompiler", "src/promptCompiler.js"],
 ];
 

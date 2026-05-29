@@ -55,6 +55,20 @@
   flex-wrap: wrap;
 }
 
+.agent-chat-workflowbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary-alt);
+}
+
+.agent-chat-workflowbar button {
+  white-space: nowrap;
+}
+
 .agent-chat-provider {
   min-width: 120px;
 }

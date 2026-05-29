@@ -26,6 +26,9 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - 显示每个 provider 的最近状态：未检测、运行中、可用、异常、已停用
 - 支持一键检测全部 Agent，并把真实调用结果写入状态条
 - 自动为 Obsidian GUI 进程补充常见本地 CLI 路径，避免终端可用但插件找不到命令
+- 默认启用你的 Obsidian 专用工作流入口：工作台、任务板、项目主页、最新项目更新、运行面板
+- 新会话默认绑定 `02-项目/Obsidian工作流/项目主页.md`
+- 支持把当前会话一键派单到 `AI AGENTS/Agent任务板.md`
 - 设置页可配置每个 provider 的 CLI 路径、工作目录、额外参数和启用状态
 
 ## 当前边界
@@ -67,6 +70,7 @@ ln -sfn /Users/yanyunuo/agent-chat-for-obsidian \
 5. 需要沉淀时点击 `写回`
 6. 需要完整留档时点击 `导出`
 7. 如果状态显示 `未检测`，点击 `检测全部 Agent` 做一次轻量探测
+8. 需要进入调度流时，点击 `派单到任务板`
 
 `检测全部 Agent` 会对每个启用的 provider 发起最小调用：`Reply with exactly: OK`。成功会标记为 `可用`，失败会标记为 `异常`，错误原因可通过状态提示查看。
 

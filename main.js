@@ -6,6 +6,7 @@ const { makeSessionExportPath, renderSessionMarkdown } = require("./src/sessionE
 const { markProviderRunning, recordProviderResult, summarizeProviderStatus } = require("./src/providerStatus");
 const { resolveWritebackTargets } = require("./src/writebackTargets");
 const { writebackSessionResult } = require("./src/writeback");
+const { WORKFLOW_DEFAULTS, formatTaskBoardRow, insertTaskRow } = require("./src/workflowConfig");
 
 const VIEW_TYPE_AGENT_CHAT = "agent-chat-view";
 
@@ -18,6 +19,7 @@ function createDefaultSettings() {
     providers: cloneProviderSettings(),
     defaultPlacement: "right",
     autoWriteback: true,
+    obsidianWorkflow: { ...WORKFLOW_DEFAULTS },
   };
 }
 
@@ -74,6 +76,16 @@ class AgentChatView extends ItemView {
     }
 
     const header = container.createDiv({ cls: "agent-chat-header" });
+    if (this.plugin.settings.obsidianWorkflow.enabled) {
+      const workflowBar = container.createDiv({ cls: "agent-chat-workflowbar" });
+      for (const link of this.plugin.settings.obsidianWorkflow.quickLinks) {
+        const button = workflowBar.createEl("button", { text: link.label });
+        button.onclick = async () => {
+          await this.plugin.openWorkflowNote(link.path);
+        };
+      }
+    }
+
     const providerSelect = header.createEl("select", { cls: "agent-chat-provider" });
     for (const providerId of Object.keys(this.plugin.settings.providers)) {
       const option = providerSelect.createEl("option", { text: this.plugin.providerLabel(providerId) });
@@ -131,6 +143,11 @@ class AgentChatView extends ItemView {
     probeAllButton.onclick = async () => {
       await this.plugin.probeAllProviders();
       await this.render();
+    };
+
+    const dispatchButton = header.createEl("button", { text: "派单到任务板" });
+    dispatchButton.onclick = async () => {
+      await this.plugin.dispatchActiveSessionToTaskBoard();
     };
 
     const writebackButton = header.createEl("button", { text: "写回" });
@@ -220,6 +237,36 @@ class AgentChatSettingTab extends PluginSettingTab {
       .addToggle((toggle) => {
         toggle.setValue(this.plugin.settings.autoWriteback).onChange(async (value) => {
           this.plugin.settings.autoWriteback = value;
+          await this.plugin.persist();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("启用专用 Obsidian 工作流")
+      .setDesc("启用后，插件会默认绑定 Obsidian工作流项目页，并显示工作台、任务板、项目主页等快捷入口。")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.obsidianWorkflow.enabled).onChange(async (value) => {
+          this.plugin.settings.obsidianWorkflow.enabled = value;
+          await this.plugin.persist();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("默认项目页")
+      .setDesc("新会话默认绑定到这个项目页。")
+      .addText((text) => {
+        text.setValue(this.plugin.settings.obsidianWorkflow.defaultProjectPath).onChange(async (value) => {
+          this.plugin.settings.obsidianWorkflow.defaultProjectPath = value.trim();
+          await this.plugin.persist();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Agent任务板路径")
+      .setDesc("点击派单到任务板时，会把当前会话作为待处理任务写入这个页面。")
+      .addText((text) => {
+        text.setValue(this.plugin.settings.obsidianWorkflow.taskBoardPath).onChange(async (value) => {
+          this.plugin.settings.obsidianWorkflow.taskBoardPath = value.trim();
           await this.plugin.persist();
         });
       });
@@ -315,6 +362,11 @@ module.exports = class AgentChatPlugin extends Plugin {
         ...cloneProviderSettings(),
         ...((saved.settings || {}).providers || {}),
       },
+      obsidianWorkflow: {
+        ...WORKFLOW_DEFAULTS,
+        ...(((saved.settings || {}).obsidianWorkflow) || {}),
+        quickLinks: (((saved.settings || {}).obsidianWorkflow) || {}).quickLinks || WORKFLOW_DEFAULTS.quickLinks,
+      },
     };
     this.state = {
       ...createDefaultState(),
@@ -349,6 +401,7 @@ module.exports = class AgentChatPlugin extends Plugin {
       id: sessionId,
       providerId,
       title: `${this.providerLabel(providerId)} 新会话`,
+      projectPath: this.settings.obsidianWorkflow.enabled ? this.settings.obsidianWorkflow.defaultProjectPath : "",
     });
     this.state.sessions[sessionId] = session;
     this.state.tabs.push({
@@ -484,6 +537,33 @@ module.exports = class AgentChatPlugin extends Plugin {
       await this.app.vault.create(filePath, markdown);
     }
     new Notice(`已导出会话：${filePath}`);
+  }
+
+  async openWorkflowNote(path) {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!file) {
+      new Notice(`找不到页面：${path}`);
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf(false);
+    await leaf.openFile(file);
+  }
+
+  async dispatchActiveSessionToTaskBoard() {
+    const session = this.getActiveSession();
+    if (!session) {
+      return;
+    }
+    const taskBoardPath = this.settings.obsidianWorkflow.taskBoardPath;
+    const file = this.app.vault.getAbstractFileByPath(taskBoardPath);
+    if (!file) {
+      new Notice(`找不到 Agent任务板：${taskBoardPath}`);
+      return;
+    }
+    const original = await this.app.vault.read(file);
+    const next = insertTaskRow(original, formatTaskBoardRow(session));
+    await this.app.vault.modify(file, next);
+    new Notice("已派单到 Agent任务板");
   }
 
   getProviderIds() {

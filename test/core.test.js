@@ -12,6 +12,7 @@ const { buildExecutionEnv, createProbeSession, createSpawnSpec } = require("../s
 const { recordProviderResult, summarizeProviderStatus } = require("../src/providerStatus");
 const { renderSessionMarkdown } = require("../src/sessionExport");
 const { resolveWritebackTargets } = require("../src/writebackTargets");
+const { WORKFLOW_DEFAULTS, formatTaskBoardRow, insertTaskRow } = require("../src/workflowConfig");
 
 test("createDefaultState returns a usable empty shell", () => {
   const state = createDefaultState();
@@ -269,4 +270,33 @@ test("release bundle does not depend on source files at runtime", () => {
 
   assert.doesNotMatch(bundle, /require\(["']\.\/src\//);
   assert.match(bundle, /__agentChatRequire/);
+});
+
+test("workflow defaults point at the user's Obsidian workflow pages", () => {
+  assert.equal(WORKFLOW_DEFAULTS.enabled, true);
+  assert.equal(WORKFLOW_DEFAULTS.defaultProjectPath, "02-项目/Obsidian工作流/项目主页.md");
+  assert.equal(WORKFLOW_DEFAULTS.taskBoardPath, "AI AGENTS/Agent任务板.md");
+  assert.ok(WORKFLOW_DEFAULTS.quickLinks.some((link) => link.label === "任务板"));
+});
+
+test("formatTaskBoardRow creates a dispatchable Agent task row", () => {
+  const session = createSession({
+    id: "session-task",
+    providerId: "claude",
+    title: "分析这个插件下一步怎么完善 | 避免断链",
+  });
+
+  const row = formatTaskBoardRow(session);
+
+  assert.equal(
+    row,
+    "| 分析这个插件下一步怎么完善 / 避免断链 | Claude Code | 待处理 | 完成分析、总结或方案判断，并写入最新分析摘要。 | [[AI AGENTS/产出/Claude Code/最新分析摘要]] |",
+  );
+});
+
+test("insertTaskRow adds new tasks before the in-progress section", () => {
+  const board = "## 待派单\n\n| 任务 | 指派给 | 状态 | 期望产出 | 落地位置 |\n|---|---|---|---|---|\n\n## 进行中\n\n（暂无）\n";
+  const next = insertTaskRow(board, "| 新任务 | Codex | 待处理 | 完成 | [[AI AGENTS/产出/Codex/最新项目更新]] |");
+
+  assert.match(next, /\| 新任务 \| Codex \| 待处理 \| 完成 \| \[\[AI AGENTS\/产出\/Codex\/最新项目更新\]\] \|\n\n## 进行中/);
 });
