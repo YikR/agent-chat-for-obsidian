@@ -239,6 +239,18 @@
   margin-bottom: 6px;
 }
 
+.agent-chat-message-body {
+  overflow-wrap: anywhere;
+}
+
+.agent-chat-message-body.markdown-rendered > :first-child {
+  margin-top: 0;
+}
+
+.agent-chat-message-body.markdown-rendered > :last-child {
+  margin-bottom: 0;
+}
+
 .agent-chat-input {
   min-height: 72px;
   resize: vertical;

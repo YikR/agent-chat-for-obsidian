@@ -422,6 +422,26 @@ test("manifest allows mobile Obsidian installation", () => {
   assert.equal(manifest.isDesktopOnly, false);
 });
 
+test("chat view renders assistant messages with Obsidian MarkdownRenderer", () => {
+  const source = fs.readFileSync("main.js", "utf8");
+
+  assert.match(source, /MarkdownRenderer/);
+  assert.match(source, /MarkdownRenderer\.renderMarkdown/);
+  assert.doesNotMatch(source, /messageEl\.createDiv\(\{\s*cls:\s*"agent-chat-message-body",\s*text:\s*message\.content\s*\}\);/);
+});
+
+test("activateView reuses an existing Agent Chat leaf before creating one", () => {
+  const source = fs.readFileSync("main.js", "utf8");
+  const activateView = source.match(/async activateView\(\) \{[\s\S]*?\n  \}/);
+
+  assert.ok(activateView, "activateView function should exist");
+  assert.match(activateView[0], /getLeavesOfType\(VIEW_TYPE_AGENT_CHAT\)/);
+  assert.ok(
+    activateView[0].indexOf("getLeavesOfType(VIEW_TYPE_AGENT_CHAT)") < activateView[0].indexOf("getRightLeaf"),
+    "activateView should inspect existing Agent Chat leaves before creating a new leaf",
+  );
+});
+
 test("workflow defaults point at the user's Obsidian workflow pages", () => {
   assert.equal(WORKFLOW_DEFAULTS.enabled, true);
   assert.equal(WORKFLOW_DEFAULTS.defaultProjectPath, "02-项目/Obsidian工作流/项目主页.md");

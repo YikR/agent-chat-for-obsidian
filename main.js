@@ -1,4 +1,4 @@
-const { Plugin, ItemView, PluginSettingTab, Setting, Notice, MarkdownView, Platform } = require("obsidian");
+const { Plugin, ItemView, PluginSettingTab, Setting, Notice, MarkdownView, MarkdownRenderer, Platform } = require("obsidian");
 
 const { createDefaultState, createSession, updateMessageContent, upsertMessage } = require("./src/sessionRegistry");
 const { DEFAULT_PROVIDER_SETTINGS, probeProvider, runProviderTurn } = require("./src/providers");
@@ -73,6 +73,17 @@ class AgentChatView extends ItemView {
       return;
     }
     setTimeout(run, 0);
+  }
+
+  async renderMessageBody(message, messageEl) {
+    const body = messageEl.createDiv({ cls: "agent-chat-message-body" });
+    const content = String(message.content || "");
+    if (message.role === "assistant") {
+      body.addClass("markdown-rendered");
+      await MarkdownRenderer.renderMarkdown(content, body, "", this);
+      return;
+    }
+    body.setText(content);
   }
 
   async render() {
@@ -249,7 +260,7 @@ class AgentChatView extends ItemView {
         text: message.role === "user" ? "用户" : "助手",
       });
       meta.setAttr("data-created-at", message.createdAt || "");
-      messageEl.createDiv({ cls: "agent-chat-message-body", text: message.content });
+      await this.renderMessageBody(message, messageEl);
     }
 
     const footer = container.createDiv({ cls: "agent-chat-footer" });
@@ -480,6 +491,14 @@ module.exports = class AgentChatPlugin extends Plugin {
   }
 
   async activateView() {
+    const existingLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_AGENT_CHAT)[0];
+    if (existingLeaf) {
+      this.app.workspace.revealLeaf(existingLeaf);
+      if (existingLeaf.view && typeof existingLeaf.view.render === "function") {
+        await existingLeaf.view.render();
+      }
+      return;
+    }
     const leaf = this.isMobileRuntime() ? this.app.workspace.getLeaf(true) : this.app.workspace.getRightLeaf(false);
     await leaf.setViewState({
       type: VIEW_TYPE_AGENT_CHAT,
