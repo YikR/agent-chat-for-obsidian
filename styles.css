@@ -130,11 +130,21 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  padding-top: 6px;
 }
 
 .agent-chat-button-group button,
 .agent-chat-workflowbar button {
   white-space: nowrap;
+}
+
+.agent-chat-workflow-details summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
 }
 
 .agent-chat-provider {

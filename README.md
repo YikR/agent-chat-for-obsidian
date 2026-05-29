@@ -31,6 +31,7 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - 支持把当前会话一键派单到 `AI AGENTS/Agent任务板.md`
 - 顶部控制区按上下文、工作流入口、会话操作分层显示，适配 Obsidian 侧边栏宽度
 - 低频操作收进 `更多` 菜单，减少顶部按钮占用
+- 工作流快捷入口默认折叠，需要时展开
 - 发送消息后会立即刷新对话区，provider 在后台继续运行
 - `检测全部 Agent` 会并行检测，减少等待时间
 - 设置页可配置每个 provider 的 CLI 路径、工作目录、额外参数和启用状态

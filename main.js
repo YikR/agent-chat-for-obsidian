@@ -114,11 +114,14 @@ class AgentChatView extends ItemView {
     };
 
     if (this.plugin.settings.obsidianWorkflow.enabled) {
-      const workflowBar = controlPanel.createDiv({ cls: "agent-chat-workflowbar" });
+      const workflowDetails = controlPanel.createEl("details", { cls: "agent-chat-workflow-details" });
+      workflowDetails.createEl("summary", { text: "工作流入口" });
+      const workflowBar = workflowDetails.createDiv({ cls: "agent-chat-workflowbar" });
       for (const link of this.plugin.settings.obsidianWorkflow.quickLinks) {
         const button = workflowBar.createEl("button", { text: link.label });
         button.onclick = async () => {
           await this.plugin.openWorkflowNote(link.path);
+          workflowDetails.removeAttribute("open");
         };
       }
     }
