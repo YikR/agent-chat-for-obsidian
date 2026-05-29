@@ -232,6 +232,7 @@ async function runProviderTurn(providerId, session, userInput, settings, options
 
 module.exports = {
   DEFAULT_PROVIDER_SETTINGS,
+  createSpawnSpec,
   getProviderConfig,
   runProviderTurn,
 };

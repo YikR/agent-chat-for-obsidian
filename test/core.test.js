@@ -7,6 +7,7 @@ const {
   upsertMessage,
 } = require("../src/sessionRegistry");
 const { buildPromptFromSession } = require("../src/promptCompiler");
+const { createSpawnSpec } = require("../src/providers");
 const { resolveWritebackTargets } = require("../src/writebackTargets");
 
 test("createDefaultState returns a usable empty shell", () => {
@@ -75,4 +76,99 @@ test("resolveWritebackTargets maps providers to latest pages and optional projec
     "AI AGENTS/产出/OpenClaw/OpenClaw 最近活动.md",
     "02-项目/Obsidian工作流/项目主页.md",
   ]);
+});
+
+test("createSpawnSpec builds a codex exec command with stdin prompt", () => {
+  const session = createSession({
+    id: "session-codex",
+    providerId: "codex",
+    title: "Codex thread",
+  });
+
+  const spec = createSpawnSpec("codex", session, "continue", {
+    providers: {
+      codex: {
+        cliPath: "codex",
+        cwd: "/tmp/codex",
+        timeoutMs: 1000,
+        extraArgs: "",
+      },
+    },
+  });
+
+  assert.equal(spec.cliPath, "codex");
+  assert.deepEqual(spec.args.slice(0, 4), ["exec", "--skip-git-repo-check", "--output-last-message", spec.args[3]]);
+  assert.equal(spec.args.at(-1), "-");
+  assert.match(spec.stdin, /当前输入：continue/);
+});
+
+test("createSpawnSpec builds a claude print command", () => {
+  const session = createSession({
+    id: "session-claude",
+    providerId: "claude",
+    title: "Claude thread",
+  });
+
+  const spec = createSpawnSpec("claude", session, "summarize", {
+    providers: {
+      claude: {
+        cliPath: "claude",
+        cwd: "/tmp/claude",
+        timeoutMs: 1000,
+        extraArgs: "",
+      },
+    },
+  });
+
+  assert.equal(spec.cliPath, "claude");
+  assert.deepEqual(spec.args.slice(0, 3), ["-p", "--output-format", "text"]);
+  assert.equal(spec.stdin, null);
+  assert.match(spec.args.at(-1), /当前输入：summarize/);
+});
+
+test("createSpawnSpec builds a hermes oneshot command", () => {
+  const session = createSession({
+    id: "session-hermes",
+    providerId: "hermes",
+    title: "Hermes thread",
+  });
+
+  const spec = createSpawnSpec("hermes", session, "check status", {
+    providers: {
+      hermes: {
+        cliPath: "hermes",
+        cwd: "/tmp/hermes",
+        timeoutMs: 1000,
+        extraArgs: "",
+      },
+    },
+  });
+
+  assert.equal(spec.cliPath, "hermes");
+  assert.deepEqual(spec.args.slice(0, 2), ["--oneshot", spec.args[1]]);
+  assert.match(spec.args[1], /当前输入：check status/);
+});
+
+test("createSpawnSpec builds an openclaw local agent command", () => {
+  const session = createSession({
+    id: "session-openclaw",
+    providerId: "openclaw",
+    title: "OpenClaw thread",
+  });
+
+  const spec = createSpawnSpec("openclaw", session, "plan next move", {
+    providers: {
+      openclaw: {
+        cliPath: "openclaw",
+        cwd: "/tmp/openclaw",
+        timeoutMs: 1000,
+        extraArgs: "",
+      },
+    },
+  });
+
+  assert.equal(spec.cliPath, "openclaw");
+  assert.deepEqual(spec.args.slice(0, 4), ["agent", "--local", "--json", "--session-key"]);
+  assert.equal(spec.args[4], "agent:main:plugin-session-openclaw");
+  assert.match(spec.args.at(-1), /当前输入：plan next move/);
 });
