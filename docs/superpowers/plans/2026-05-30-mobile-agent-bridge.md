@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make Agent Chat work on both desktop and mobile by keeping desktop local CLI execution as the default and adding an opt-in mobile remote bridge to execute agent turns on the desktop Mac.
+**Goal:** Make Agent Chat work on both desktop and mobile by keeping desktop local CLI execution as the default and making mobile Bridge-preferred by default for this personal workflow.
 
-**Architecture:** Add a small HTTP bridge server for the desktop Mac, a fetch-based bridge client for Obsidian mobile, and a transport selector that chooses local CLI on desktop, remote bridge on configured mobile, or the current mobile workbench fallback. Keep provider adapters in `src/providers.js` as the single local execution path so Codex, Claude, Hermes, and OpenClaw behavior remains consistent.
+**Architecture:** Add a small HTTP bridge server for the desktop Mac, a fetch-based bridge client for Obsidian mobile, and a transport selector that chooses local CLI on desktop, remote bridge on configured mobile, or the current mobile workbench fallback when the default Bridge setting still lacks a local token. Keep provider adapters in `src/providers.js` as the single local execution path so Codex, Claude, Hermes, and OpenClaw behavior remains consistent.
 
 **Tech Stack:** Obsidian plugin API, CommonJS JavaScript, Node built-ins (`http`, `fs`, `path`, `os`, `child_process`), `fetch` / `AbortController`, Node `node:test`
 
@@ -47,10 +47,12 @@ const {
 Add these tests after the existing provider spawn spec tests:
 
 ```js
-test("mergeRemoteBridgeSettings keeps mobile bridge disabled by default", () => {
+test("mergeRemoteBridgeSettings keeps mobile bridge enabled by default without exposing a token", () => {
   const settings = mergeRemoteBridgeSettings();
 
   assert.deepEqual(settings, DEFAULT_REMOTE_BRIDGE_SETTINGS);
+  assert.equal(settings.enabled, true);
+  assert.equal(settings.token, "");
   assert.equal(hasRemoteBridgeConfig(settings), false);
 });
 
@@ -194,7 +196,7 @@ Create `/Users/yanyunuo/agent-chat-for-obsidian/src/bridgeClient.js` with:
 
 ```js
 const DEFAULT_REMOTE_BRIDGE_SETTINGS = {
-  enabled: false,
+  enabled: true,
   url: "http://127.0.0.1:3876",
   token: "",
   timeoutMs: 10 * 60 * 1000,
@@ -810,7 +812,7 @@ test("runTurnForRuntime uses remote bridge on configured mobile", async () => {
   assert.equal(calls[0].bridge.token, "secret");
 });
 
-test("runTurnForRuntime returns unavailable on mobile without bridge", async () => {
+test("runTurnForRuntime returns unavailable on mobile when default bridge lacks token", async () => {
   const result = await runTurnForRuntime({
     isMobile: true,
     providerId: "codex",
@@ -819,7 +821,7 @@ test("runTurnForRuntime returns unavailable on mobile without bridge", async () 
     settings: {
       providers: { codex: { enabled: true } },
       remoteBridge: {
-        enabled: false,
+        enabled: true,
         url: "http://127.0.0.1:3876",
         token: "",
         timeoutMs: 1000,
@@ -1003,7 +1005,7 @@ containerEl.createEl("h3", { text: "手机端桌面 Bridge" });
 
 new Setting(containerEl)
   .setName("启用手机端远程执行")
-  .setDesc("开启后，手机端会把对话请求发送到桌面 Mac 的 Agent Chat Bridge。桌面端默认仍直接运行本地 CLI。")
+  .setDesc("默认开启。手机端会优先把对话请求发送到桌面 Mac 的 Agent Chat Bridge；桌面端默认仍直接运行本地 CLI。")
   .addToggle((toggle) => {
     toggle.setValue(this.plugin.settings.remoteBridge.enabled).onChange(async (value) => {
       this.plugin.settings.remoteBridge.enabled = value;
@@ -1013,7 +1015,7 @@ new Setting(containerEl)
 
 new Setting(containerEl)
   .setName("Bridge 地址")
-  .setDesc("手机访问桌面 Mac 时应填写 Mac 的局域网地址，例如 http://192.168.1.2:3876。127.0.0.1 只代表当前设备。")
+  .setDesc("手机访问桌面 Mac 时应填写 Mac 的局域网地址，例如 http://192.168.1.2:3876。127.0.0.1 只代表当前设备；真实地址只保存在本地插件配置里。")
   .addText((text) => {
     text.setValue(this.plugin.settings.remoteBridge.url || DEFAULT_REMOTE_BRIDGE_SETTINGS.url).onChange(async (value) => {
       this.plugin.settings.remoteBridge.url = value.trim();
@@ -1023,7 +1025,7 @@ new Setting(containerEl)
 
 new Setting(containerEl)
   .setName("Bridge Token")
-  .setDesc("必须和桌面 Bridge 配置中的 token 一致。不要把这个 token 写入普通笔记或公开仓库。")
+  .setDesc("必须和桌面 Bridge 配置中的 token 一致。默认不内置 token；不要把这个 token 写入普通笔记或公开仓库。")
   .addText((text) => {
     text.inputEl.type = "password";
     text.setValue(this.plugin.settings.remoteBridge.token || "").onChange(async (value) => {
@@ -1095,7 +1097,7 @@ if (this.isMobileRuntime() && !hasRemoteBridgeConfig(this.settings.remoteBridge)
   });
   await this.persist();
   await this.refreshOpenViews();
-  new Notice("已记录输入；执行请回桌面端、派单到任务板或配置桌面 Bridge");
+  new Notice("已记录输入；请先填写桌面 Bridge URL 和 token，或回桌面端/任务板执行");
   return;
 }
 ```
@@ -1170,8 +1172,9 @@ Replace the current mobile section with content covering:
 插件同时适配桌面端和手机端，但两端执行方式不同：
 
 - 桌面端：默认直接运行本机 `codex / claude / hermes / openclaw` CLI。
-- 手机端未配置 Bridge：可查看会话、写回、导出、派单到任务板，但不会直接运行本地 CLI。
-- 手机端已配置 Bridge：通过桌面 Mac 的 Agent Chat Bridge 远程执行 agent，然后把回复写入同一个会话。
+- 手机端默认 Bridge 优先：插件设置里默认启用手机端远程执行，但不会内置真实 URL/token。
+- 手机端未填写 Bridge token：可查看会话、写回、导出、派单到任务板，但不会直接运行本地 CLI。
+- 手机端已填写 Bridge URL/token：通过桌面 Mac 的 Agent Chat Bridge 远程执行 agent，然后把回复写入同一个会话。
 
 启动桌面 Bridge：
 
@@ -1189,7 +1192,7 @@ JSON
 npm run bridge
 ```
 
-手机访问时，把 `host` 改成桌面 Mac 的局域网 IP，并在插件设置中填写同样的 URL 和 token。不要把 Bridge 暴露到公网；第一版只支持可信局域网使用。
+手机访问时，把 `host` 改成桌面 Mac 的局域网 IP，并在插件设置中填写同样的 URL 和 token。插件默认倾向使用 Bridge，但真实 URL/token 只保存在你的本地插件配置里。不要把 Bridge 暴露到公网；第一版只支持可信局域网使用。
 ```
 
 - [ ] **Step 2: Update changelog and versions**
@@ -1211,9 +1214,9 @@ Add a `CHANGELOG.md` entry:
 ```markdown
 ## 0.7.0
 
-- Added optional desktop Agent Chat Bridge for mobile Obsidian execution.
+- Added default-enabled desktop Agent Chat Bridge preference for mobile Obsidian execution.
 - Kept desktop execution on the existing local CLI path by default.
-- Added mobile Bridge settings for URL, token, and timeout.
+- Added mobile Bridge settings for URL, token, and timeout; real secrets remain local.
 - Added bridge client, bridge server, and runtime transport tests.
 ```
 
@@ -1282,7 +1285,7 @@ Run:
 gh release create v0.7.0 \
   --repo YikR/agent-chat-for-obsidian \
   --title "v0.7.0" \
-  --notes "Adds optional desktop Agent Chat Bridge for mobile Obsidian execution while keeping desktop local CLI execution as the default." \
+  --notes "Adds default-enabled mobile Agent Chat Bridge preference while keeping desktop local CLI execution as the default. Real Bridge URL/token remain local settings." \
   dist/main.js dist/manifest.json dist/styles.css
 ```
 
@@ -1306,7 +1309,7 @@ Update the Codex latest page top block with:
 ## 2026-05-30 Agent Chat v0.7.0 双端适配
 
 - 任务：让 Agent Chat 同时适配桌面端和手机端。
-- 结果：桌面端继续默认直接调用本机 CLI；手机端保留工作台模式，并新增可选桌面 Agent Chat Bridge 远程执行路径。Bridge 使用局域网 HTTP + bearer token，第一版不支持公网暴露。
+- 结果：桌面端继续默认直接调用本机 CLI；手机端默认启用桌面 Agent Chat Bridge 偏好，填写本地 URL/token 后通过局域网远程执行，未填写 token 时仍保留工作台/派单兜底。Bridge 使用局域网 HTTP + bearer token，第一版不支持公网暴露。
 - 验证：`npm test`、`node --check main.js`、`node --check src/bridgeClient.js`、`node --check src/bridgeServer.js`、`node --check src/turnTransport.js`、`node --check scripts/agent-chat-bridge.js`、`node --check dist/main.js`。
 - 发布：GitHub release `v0.7.0`。
 ```
@@ -1319,7 +1322,7 @@ Update the design document with an implementation supplement that records the du
 ## 2026-05-30 实施补充：0.7.0 双端适配
 
 - 桌面端：继续以本机 CLI 为默认执行路径。
-- 手机端：未配置 Bridge 时仅作为工作台；配置桌面 Bridge 后通过局域网远程执行 agent。
+- 手机端：默认 Bridge 优先；未填写本地 URL/token 时仅作为工作台，配置桌面 Bridge 后通过局域网远程执行 agent。
 - 安全边界：token 鉴权、局域网优先、不把模型/API 密钥放到手机端。
 ```
 

@@ -65,7 +65,7 @@ This keeps all high-risk execution and credentials on the Mac while making the m
 
 1. User sends a message in Obsidian mobile.
 2. Plugin records the user message in the local session immediately.
-3. If mobile bridge mode is enabled, plugin sends a `POST /v1/turn` request to the desktop bridge.
+3. Mobile defaults to Bridge-preferred mode. If Bridge URL and token are configured, plugin sends a `POST /v1/turn` request to the desktop bridge.
 4. Bridge validates token and provider.
 5. Bridge calls `runProviderTurn(providerId, session, userInput, settings, options)`.
 6. Bridge returns assistant text, command summary, provider status, and optional native session metadata.
@@ -175,7 +175,7 @@ Add a `remoteBridge` setting group:
 
 ```json
 {
-  "enabled": false,
+  "enabled": true,
   "url": "http://127.0.0.1:3876",
   "token": "",
   "timeoutMs": 600000
@@ -184,8 +184,10 @@ Add a `remoteBridge` setting group:
 
 Mobile behavior:
 
-- If `remoteBridge.enabled` is `false`, keep the existing mobile message: record input but do not execute.
-- If enabled and configured, send the provider turn to the bridge.
+- Mobile Bridge mode is enabled by default because this plugin is for a personal workflow.
+- If URL and token are configured, send the provider turn to the bridge.
+- If the token is still empty, keep the existing mobile workbench fallback: record input but do not execute, and prompt the user to finish Bridge setup.
+- The public repository must not hardcode the user's real LAN IP or Bridge token.
 - If the bridge call fails, append a clear assistant error message and keep the user input in the session.
 
 Desktop behavior:
@@ -196,6 +198,7 @@ Desktop behavior:
 ## Security Rules
 
 - Token is required for all non-health execution endpoints.
+- The default plugin setting may enable Bridge mode, but the token remains empty until configured locally.
 - Bridge rejects unknown provider IDs.
 - Bridge only allows providers listed in `allowedProviders`.
 - Bridge never returns raw environment variables.
@@ -207,7 +210,7 @@ Desktop behavior:
 
 Use these user-visible error categories:
 
-- Bridge not configured: mobile keeps current local-CLI unavailable message.
+- Bridge token not configured: mobile keeps current local-CLI unavailable message and asks the user to finish Bridge setup.
 - Network unreachable: show that the phone cannot reach the desktop bridge URL.
 - Unauthorized: show that the bridge token is wrong.
 - Provider disabled: show that the selected agent is disabled in plugin settings.
@@ -223,8 +226,8 @@ Automated tests should cover:
 - Bridge server rejects missing token.
 - Bridge server rejects unknown provider IDs.
 - Bridge server can execute through an injected fake provider runner.
-- Mobile routing uses remote bridge when enabled.
-- Mobile routing keeps existing no-local-CLI message when remote bridge is disabled.
+- Mobile routing uses remote bridge when URL and token are configured.
+- Mobile routing keeps existing no-local-CLI message when the default Bridge setting is enabled but token is missing.
 
 Manual verification should cover:
 
@@ -254,4 +257,4 @@ These are fixed for the first implementation:
 - Scope: LAN-first desktop bridge.
 - Auth: static bearer token.
 - Desktop default: local CLI, not bridge.
-- Mobile default: no remote execution until the user enables and configures bridge settings.
+- Mobile default: Bridge-preferred mode is enabled, but remote execution still requires a locally configured URL and token.
