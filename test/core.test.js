@@ -885,6 +885,34 @@ test("settings UI exposes a dedicated Codex permission mode selector", () => {
   assert.match(source, /bypass-approvals-and-sandbox/);
 });
 
+test("settings UI exposes default-enabled mobile bridge configuration", () => {
+  const source = fs.readFileSync("main.js", "utf8");
+
+  assert.match(source, /mergeRemoteBridgeSettings/);
+  assert.match(source, /手机端桌面 Bridge/);
+  assert.match(source, /启用手机端远程执行/);
+  assert.match(source, /Bridge 地址/);
+  assert.match(source, /Bridge Token/);
+  assert.match(source, /inputEl\.type = "password"/);
+});
+
+test("sendMessageToActiveSession routes through runtime transport", () => {
+  const source = fs.readFileSync("main.js", "utf8");
+
+  assert.match(source, /runTurnForRuntime/);
+  assert.match(source, /requestBridgeTurn/);
+  assert.match(source, /localRunner: runProviderTurn/);
+  assert.match(source, /remoteRunner: requestBridgeTurn/);
+  assert.match(source, /手机端记录输入，未配置桌面 Bridge/);
+});
+
+test("build script bundles mobile bridge runtime modules", () => {
+  const source = fs.readFileSync("scripts/build.js", "utf8");
+
+  assert.match(source, /\["\.\/src\/bridgeClient", "src\/bridgeClient\.js"\]/);
+  assert.match(source, /\["\.\/src\/turnTransport", "src\/turnTransport\.js"\]/);
+});
+
 test("renderProviderStatusBlock creates a workflow-readable status table", () => {
   const lines = renderProviderStatusBlock(
     ["codex", "claude"],

@@ -8,9 +8,11 @@ const { resolveWritebackTargets } = require("./src/writebackTargets");
 const { writebackSessionResult } = require("./src/writeback");
 const { writeProviderStatusToObsidian } = require("./src/agentStatusBridge");
 const { WORKFLOW_DEFAULTS, formatTaskBoardRow, insertTaskRow } = require("./src/workflowConfig");
+const { DEFAULT_REMOTE_BRIDGE_SETTINGS, hasRemoteBridgeConfig, mergeRemoteBridgeSettings, requestBridgeTurn } = require("./src/bridgeClient");
+const { runTurnForRuntime } = require("./src/turnTransport");
 
 const VIEW_TYPE_AGENT_CHAT = "agent-chat-view";
-const MOBILE_LOCAL_CLI_MESSAGE = "手机端 Obsidian 不能直接运行本机 CLI Agent。已把这条输入记录在会话里；如需执行，请同步到桌面端继续运行，或使用“派单到任务板”进入调度流。";
+const MOBILE_LOCAL_CLI_MESSAGE = "手机端 Obsidian 不能直接运行本机 CLI Agent。已把这条输入记录在会话里；如需执行，请填写桌面 Bridge URL 和 token、同步到桌面端继续运行，或使用“派单到任务板”进入调度流。";
 
 function cloneProviderSettings() {
   return JSON.parse(JSON.stringify(DEFAULT_PROVIDER_SETTINGS));
@@ -31,6 +33,7 @@ function mergeProviderSettings(savedProviders = {}) {
 function createDefaultSettings() {
   return {
     providers: mergeProviderSettings(),
+    remoteBridge: mergeRemoteBridgeSettings(),
     defaultPlacement: "right",
     autoWriteback: true,
     obsidianWorkflow: { ...WORKFLOW_DEFAULTS },
@@ -116,7 +119,9 @@ class AgentChatView extends ItemView {
     if (this.plugin.isMobileRuntime()) {
       container.createDiv({
         cls: "agent-chat-mobile-banner",
-        text: "手机端模式：可查看会话、写回、导出和派单；本地 CLI Agent 只能在桌面端运行。",
+        text: hasRemoteBridgeConfig(this.plugin.settings.remoteBridge)
+          ? "手机端模式：已启用桌面 Bridge，可远程执行 Agent；检测本地 CLI 仍只在桌面端运行。"
+          : "手机端模式：可查看会话、写回、导出和派单；如需直接执行 Agent，请在设置中启用桌面 Bridge。",
       });
     }
 
@@ -266,7 +271,9 @@ class AgentChatView extends ItemView {
     const footer = container.createDiv({ cls: "agent-chat-footer" });
     const input = footer.createEl("textarea", {
       cls: "agent-chat-input",
-      placeholder: this.plugin.isMobileRuntime() ? "手机端会记录输入；执行请回桌面端或派单…" : "继续推进这个问题…",
+      placeholder: this.plugin.isMobileRuntime()
+        ? (hasRemoteBridgeConfig(this.plugin.settings.remoteBridge) ? "通过桌面 Bridge 继续推进…" : "手机端会记录输入；执行请回桌面端、派单或配置 Bridge…")
+        : "继续推进这个问题…",
     });
     input.onkeydown = async (event) => {
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -313,6 +320,50 @@ class AgentChatSettingTab extends PluginSettingTab {
       .addToggle((toggle) => {
         toggle.setValue(this.plugin.settings.autoWriteback).onChange(async (value) => {
           this.plugin.settings.autoWriteback = value;
+          await this.plugin.persist();
+        });
+      });
+
+    containerEl.createEl("h3", { text: "手机端桌面 Bridge" });
+
+    new Setting(containerEl)
+      .setName("启用手机端远程执行")
+      .setDesc("默认开启。手机端会优先把对话请求发送到桌面 Mac 的 Agent Chat Bridge；桌面端默认仍直接运行本地 CLI。")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.remoteBridge.enabled).onChange(async (value) => {
+          this.plugin.settings.remoteBridge.enabled = value;
+          await this.plugin.persist();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Bridge 地址")
+      .setDesc("手机访问桌面 Mac 时应填写 Mac 的局域网地址，例如 http://192.168.1.2:3876。127.0.0.1 只代表当前设备；真实地址只保存在本地插件配置里。")
+      .addText((text) => {
+        text.setValue(this.plugin.settings.remoteBridge.url || DEFAULT_REMOTE_BRIDGE_SETTINGS.url).onChange(async (value) => {
+          this.plugin.settings.remoteBridge.url = value.trim();
+          await this.plugin.persist();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Bridge Token")
+      .setDesc("必须和桌面 Bridge 配置中的 token 一致。默认不内置 token；不要把这个 token 写入普通笔记或公开仓库。")
+      .addText((text) => {
+        text.inputEl.type = "password";
+        text.setValue(this.plugin.settings.remoteBridge.token || "").onChange(async (value) => {
+          this.plugin.settings.remoteBridge.token = value.trim();
+          await this.plugin.persist();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Bridge 超时毫秒")
+      .setDesc("手机端等待桌面 Bridge 返回的最长时间。")
+      .addText((text) => {
+        text.setValue(String(this.plugin.settings.remoteBridge.timeoutMs || DEFAULT_REMOTE_BRIDGE_SETTINGS.timeoutMs)).onChange(async (value) => {
+          const next = Number.parseInt(value, 10);
+          this.plugin.settings.remoteBridge.timeoutMs = Number.isFinite(next) && next > 0 ? next : DEFAULT_REMOTE_BRIDGE_SETTINGS.timeoutMs;
           await this.plugin.persist();
         });
       });
@@ -485,6 +536,7 @@ module.exports = class AgentChatPlugin extends Plugin {
       providers: {
         ...mergeProviderSettings((saved.settings || {}).providers || {}),
       },
+      remoteBridge: mergeRemoteBridgeSettings((saved.settings || {}).remoteBridge || {}),
       obsidianWorkflow: {
         ...WORKFLOW_DEFAULTS,
         ...(((saved.settings || {}).obsidianWorkflow) || {}),
@@ -913,15 +965,15 @@ module.exports = class AgentChatPlugin extends Plugin {
     if (!session.title || session.title.includes("新会话")) {
       session.title = promptForTitle.slice(0, 40);
     }
-    if (!this.canRunLocalProviders()) {
+    if (this.isMobileRuntime() && !hasRemoteBridgeConfig(this.settings.remoteBridge)) {
       upsertMessage(session, { role: "assistant", content: MOBILE_LOCAL_CLI_MESSAGE });
       recordProviderResult(this.state.providerStatus, providerId, {
         ok: false,
-        message: "手机端记录输入，不运行本地 CLI。",
+        message: "手机端记录输入，未配置桌面 Bridge。",
       });
       await this.persist();
       await this.refreshOpenViews();
-      new Notice("已记录输入；执行请回桌面端或派单到任务板");
+      new Notice("已记录输入；请先填写桌面 Bridge URL 和 token，或回桌面端/任务板执行");
       return;
     }
     this.running.set(session.id, null);
@@ -937,26 +989,35 @@ module.exports = class AgentChatPlugin extends Plugin {
       await this.persist();
       await this.refreshOpenViews();
 
-      const result = await runProviderTurn(providerId, promptSession, userInput, this.settings, {
+      const result = await runTurnForRuntime({
+        isMobile: this.isMobileRuntime(),
+        providerId,
+        session: promptSession,
+        userInput,
+        settings: this.settings,
         cwd: this.app.vault.adapter.basePath,
-        onSpawn: (child) => {
-          this.running.set(session.id, child);
-        },
-        onStdout: (chunk, _stdout, spec) => {
-          if (!spec || typeof spec.streamParser !== "function") {
-            return;
-          }
-          const nextChunk = spec.streamParser(chunk);
-          if (!nextChunk) {
-            return;
-          }
-          streamedText += nextChunk;
-          updateMessageContent(session, assistantMessage.id, streamedText);
-          const now = Date.now();
-          if (now - lastStreamRefresh > 250) {
-            lastStreamRefresh = now;
-            void this.refreshOpenViews();
-          }
+        localRunner: runProviderTurn,
+        remoteRunner: requestBridgeTurn,
+        runOptions: {
+          onSpawn: (child) => {
+            this.running.set(session.id, child);
+          },
+          onStdout: (chunk, _stdout, spec) => {
+            if (!spec || typeof spec.streamParser !== "function") {
+              return;
+            }
+            const nextChunk = spec.streamParser(chunk);
+            if (!nextChunk) {
+              return;
+            }
+            streamedText += nextChunk;
+            updateMessageContent(session, assistantMessage.id, streamedText);
+            const now = Date.now();
+            if (now - lastStreamRefresh > 250) {
+              lastStreamRefresh = now;
+              void this.refreshOpenViews();
+            }
+          },
         },
       });
       this.running.delete(session.id);
