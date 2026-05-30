@@ -1,5 +1,11 @@
 # 变更记录
 
+## 0.6.3 - 2026-05-30
+
+- 新增 Codex 专用权限模式设置，可显式选择 `workspace-write`、`danger-full-access` 或“跳过审批和沙盒”。
+- Codex provider 会把权限模式转换成真实 `codex exec` 参数，避免插件和终端 Codex CLI 权限行为不一致。
+- Codex 工作目录说明补充：要接近终端 CLI，建议把工作目录设为 `/Users/yanyunuo`，留空则仍以当前 vault 为工作根。
+
 ## 0.6.2 - 2026-05-29
 
 - 聊天框助手消息改用 Obsidian `MarkdownRenderer` 渲染，支持标题、列表、代码块、表格等 Markdown 格式。

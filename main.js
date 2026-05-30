@@ -391,13 +391,31 @@ class AgentChatSettingTab extends PluginSettingTab {
 
       new Setting(containerEl)
         .setName(`${this.plugin.providerLabel(providerId)} 工作目录`)
-        .setDesc("留空时使用当前 vault 路径。")
+        .setDesc(providerId === "codex" ? "留空时使用当前 vault 路径；要更接近终端 Codex CLI，建议填 /Users/yanyunuo。" : "留空时使用当前 vault 路径。")
         .addText((text) => {
           text.setValue(provider.cwd || "").onChange(async (value) => {
             provider.cwd = value.trim();
             await this.plugin.persist();
           });
         });
+
+      if (providerId === "codex") {
+        new Setting(containerEl)
+          .setName("Codex 权限模式")
+          .setDesc("控制插件启动 codex exec 时传入的权限参数。终端同权/跳过审批模式等同传入 --dangerously-bypass-approvals-and-sandbox，风险最高。")
+          .addDropdown((dropdown) => {
+            dropdown
+              .addOption("inherit", "继承 Codex 默认")
+              .addOption("workspace-write", "workspace-write")
+              .addOption("danger-full-access", "danger-full-access")
+              .addOption("bypass-approvals-and-sandbox", "终端同权：跳过审批和沙盒")
+              .setValue(provider.permissionMode || "inherit")
+              .onChange(async (value) => {
+                provider.permissionMode = value;
+                await this.plugin.persist();
+              });
+          });
+      }
 
       new Setting(containerEl)
         .setName(`${this.plugin.providerLabel(providerId)} 额外参数`)

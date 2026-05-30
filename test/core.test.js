@@ -173,6 +173,51 @@ test("createSpawnSpec builds a codex exec command with stdin prompt", () => {
   assert.match(spec.stdin, /当前输入：continue/);
 });
 
+test("createSpawnSpec can grant Codex danger-full-access explicitly", () => {
+  const session = createSession({
+    id: "session-codex-full-access",
+    providerId: "codex",
+    title: "Codex full access",
+  });
+
+  const spec = createSpawnSpec("codex", session, "continue", {
+    providers: {
+      codex: {
+        cliPath: "codex",
+        cwd: "/Users/yanyunuo",
+        timeoutMs: 1000,
+        extraArgs: "",
+        permissionMode: "danger-full-access",
+      },
+    },
+  });
+
+  assert.equal(spec.cwd, "/Users/yanyunuo");
+  assert.deepEqual(spec.args.slice(0, 6), ["exec", "--skip-git-repo-check", "--output-last-message", spec.args[3], "--sandbox", "danger-full-access"]);
+});
+
+test("createSpawnSpec can make Codex bypass approvals and sandbox when configured", () => {
+  const session = createSession({
+    id: "session-codex-bypass",
+    providerId: "codex",
+    title: "Codex bypass",
+  });
+
+  const spec = createSpawnSpec("codex", session, "continue", {
+    providers: {
+      codex: {
+        cliPath: "codex",
+        cwd: "/Users/yanyunuo",
+        timeoutMs: 1000,
+        extraArgs: "",
+        permissionMode: "bypass-approvals-and-sandbox",
+      },
+    },
+  });
+
+  assert.ok(spec.args.includes("--dangerously-bypass-approvals-and-sandbox"));
+});
+
 test("createSpawnSpec builds a claude print command", () => {
   const session = createSession({
     id: "session-claude",
@@ -448,6 +493,14 @@ test("workflow defaults point at the user's Obsidian workflow pages", () => {
   assert.equal(WORKFLOW_DEFAULTS.taskBoardPath, "AI AGENTS/Agent任务板.md");
   assert.equal(WORKFLOW_DEFAULTS.agentStatusPath, "AI AGENTS/接入状态.md");
   assert.ok(WORKFLOW_DEFAULTS.quickLinks.some((link) => link.label === "任务板"));
+});
+
+test("settings UI exposes a dedicated Codex permission mode selector", () => {
+  const source = fs.readFileSync("main.js", "utf8");
+
+  assert.match(source, /Codex 权限模式/);
+  assert.match(source, /permissionMode/);
+  assert.match(source, /bypass-approvals-and-sandbox/);
 });
 
 test("renderProviderStatusBlock creates a workflow-readable status table", () => {

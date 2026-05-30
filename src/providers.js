@@ -9,6 +9,7 @@ const DEFAULT_PROVIDER_SETTINGS = {
     timeoutMs: 10 * 60 * 1000,
     extraArgs: "",
     nativeResume: true,
+    permissionMode: "inherit",
   },
   claude: {
     enabled: true,
@@ -85,6 +86,22 @@ function getProviderConfig(settings, providerId) {
     ...DEFAULT_PROVIDER_SETTINGS[providerId],
     ...configured,
   };
+}
+
+function codexPermissionArgs(permissionMode) {
+  if (permissionMode === "danger-full-access") {
+    return ["--sandbox", "danger-full-access"];
+  }
+  if (permissionMode === "bypass-approvals-and-sandbox") {
+    return ["--dangerously-bypass-approvals-and-sandbox"];
+  }
+  if (permissionMode === "workspace-write") {
+    return ["--sandbox", "workspace-write"];
+  }
+  if (permissionMode === "read-only") {
+    return ["--sandbox", "read-only"];
+  }
+  return [];
 }
 
 function extractOpenClawText(raw) {
@@ -200,6 +217,7 @@ function createSpawnSpec(providerId, session, userInput, settings, options = {})
     const outputFile = path.join(os.tmpdir(), `agent-chat-codex-${Date.now()}.txt`);
     const nativeSession = resolveNativeSession(providerId, session);
     const resumeTarget = nativeSession.sessionId || nativeSession.threadName;
+    const permissionArgs = codexPermissionArgs(config.permissionMode);
     const args = resumeTarget
       ? [
           "exec",
@@ -207,6 +225,7 @@ function createSpawnSpec(providerId, session, userInput, settings, options = {})
           "--skip-git-repo-check",
           "--output-last-message",
           outputFile,
+          ...permissionArgs,
           ...extraArgs,
           resumeTarget,
           "-",
@@ -216,6 +235,7 @@ function createSpawnSpec(providerId, session, userInput, settings, options = {})
           "--skip-git-repo-check",
           "--output-last-message",
           outputFile,
+          ...permissionArgs,
           ...extraArgs,
           "-",
         ];
@@ -411,6 +431,7 @@ async function probeProvider(providerId, settings, options = {}) {
 module.exports = {
   DEFAULT_PROVIDER_SETTINGS,
   buildExecutionEnv,
+  codexPermissionArgs,
   createProbeSession,
   createSpawnSpec,
   getProviderConfig,
