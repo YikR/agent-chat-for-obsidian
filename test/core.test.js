@@ -21,12 +21,15 @@ const {
   buildBridgeTurnPayload,
   hasRemoteBridgeConfig,
   mergeRemoteBridgeSettings,
+  requestBridgeHealth,
   requestBridgeTurn,
 } = require("../src/bridgeClient");
 const {
   AUTO_BRIDGE_DEFAULT_PORT,
   createAutoBridgeConfig,
   detectLanHost,
+  detectRemoteBridgeHost,
+  detectTailscaleHost,
   generateBridgeToken,
 } = require("../src/bridgeSetup");
 const { createBridgeServer, DEFAULT_BRIDGE_CONFIG } = require("../src/bridgeServer");
@@ -405,10 +408,21 @@ test("detectLanHost falls back to localhost without a LAN address", () => {
   assert.equal(host, "127.0.0.1");
 });
 
+test("detectRemoteBridgeHost prefers Tailscale over LAN for off-LAN mobile access", () => {
+  const networkInterfaces = {
+    en0: [{ family: "IPv4", address: "192.168.31.22", internal: false }],
+    utun5: [{ family: "IPv4", address: "100.89.12.34", internal: false }],
+  };
+
+  assert.equal(detectTailscaleHost(networkInterfaces), "100.89.12.34");
+  assert.equal(detectRemoteBridgeHost(networkInterfaces), "100.89.12.34");
+});
+
 test("createAutoBridgeConfig creates synced mobile settings and desktop config", () => {
   const result = createAutoBridgeConfig({
     networkInterfaces: {
       en0: [{ family: "IPv4", address: "192.168.31.22", internal: false }],
+      utun5: [{ family: "IPv4", address: "100.89.12.34", internal: false }],
     },
     randomBytes: (size) => Buffer.alloc(size, 0xab),
     homeDir: "/Users/yanyunuo",
@@ -420,18 +434,88 @@ test("createAutoBridgeConfig creates synced mobile settings and desktop config",
   assert.equal(generateBridgeToken({ randomBytes: (size) => Buffer.alloc(size, 0xcd) }), "cd".repeat(32));
   assert.deepEqual(result.bridgeSettings, {
     enabled: true,
-    url: "http://192.168.31.22:3876",
+    url: "http://100.89.12.34:3876",
     token: "ab".repeat(32),
     timeoutMs: DEFAULT_REMOTE_BRIDGE_SETTINGS.timeoutMs,
   });
   assert.deepEqual(result.bridgeConfig, {
-    host: "192.168.31.22",
+    host: "0.0.0.0",
     port: 3876,
     token: "ab".repeat(32),
     allowedProviders: ["codex", "openclaw"],
     defaultCwd: "/Users/yanyunuo",
   });
   assert.equal(result.configPath, "/Users/yanyunuo/.agent-chat-bridge/config.json");
+});
+
+test("createAutoBridgeConfig can force LAN mode when requested", () => {
+  const result = createAutoBridgeConfig({
+    networkMode: "lan",
+    networkInterfaces: {
+      en0: [{ family: "IPv4", address: "192.168.31.22", internal: false }],
+      utun5: [{ family: "IPv4", address: "100.89.12.34", internal: false }],
+    },
+    randomBytes: (size) => Buffer.alloc(size, 0xef),
+    homeDir: "/Users/yanyunuo",
+    defaultCwd: "/Users/yanyunuo",
+  });
+
+  assert.equal(result.bridgeSettings.url, "http://192.168.31.22:3876");
+  assert.equal(result.bridgeConfig.host, "0.0.0.0");
+});
+
+test("requestBridgeHealth checks bridge reachability without exposing token", async () => {
+  const calls = [];
+  const result = await requestBridgeHealth({
+    bridge: {
+      enabled: true,
+      url: "http://100.89.12.34:3876/",
+      token: "secret",
+      timeoutMs: 600000,
+    },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            ok: true,
+            name: "agent-chat-bridge",
+            providers: ["codex", "openclaw"],
+          };
+        },
+      };
+    },
+    AbortControllerImpl: AbortController,
+  });
+
+  assert.equal(calls[0].url, "http://100.89.12.34:3876/v1/health");
+  assert.equal(calls[0].options.headers.Authorization, undefined);
+  assert.deepEqual(result.providers, ["codex", "openclaw"]);
+});
+
+test("requestBridgeHealth reports unreachable bridge clearly", async () => {
+  await assert.rejects(
+    () => requestBridgeHealth({
+      bridge: {
+        enabled: true,
+        url: "http://100.89.12.34:3876",
+        token: "secret",
+        timeoutMs: 600000,
+      },
+      fetchImpl: async () => ({
+        ok: false,
+        status: 503,
+        statusText: "Service Unavailable",
+        async json() {
+          return { ok: false, error: "Bridge down" };
+        },
+      }),
+      AbortControllerImpl: AbortController,
+    }),
+    /Bridge health check failed \(503\): Bridge down/,
+  );
 });
 
 test("createBridgeServer exposes health with configured providers", async () => {
@@ -966,6 +1050,14 @@ test("settings UI exposes one-click mobile bridge initialization", () => {
   assert.match(source, /createAutoBridgeConfig/);
   assert.match(source, /一键初始化手机 Bridge/);
   assert.match(source, /initializeMobileBridge/);
+});
+
+test("settings UI exposes bridge reachability check and remote network guidance", () => {
+  const source = fs.readFileSync("main.js", "utf8");
+
+  assert.match(source, /检测 Bridge 可达性/);
+  assert.match(source, /Tailscale/);
+  assert.match(source, /checkRemoteBridgeHealth/);
 });
 
 test("sendMessageToActiveSession routes through runtime transport", () => {

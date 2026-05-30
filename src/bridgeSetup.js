@@ -2,6 +2,7 @@ const { DEFAULT_REMOTE_BRIDGE_SETTINGS } = require("./bridgeClient");
 
 const AUTO_BRIDGE_DEFAULT_PORT = 3876;
 const DEFAULT_ALLOWED_PROVIDERS = ["codex", "claude", "hermes", "openclaw"];
+const BRIDGE_LISTEN_HOST = "0.0.0.0";
 
 function requireNode(moduleName) {
   return require(moduleName);
@@ -25,6 +26,15 @@ function isPrivateIpv4(address) {
   return parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31;
 }
 
+function isTailscaleIpv4(address) {
+  const parts = String(address || "").split(".").map((part) => Number.parseInt(part, 10));
+  return parts.length === 4 &&
+    parts.every((part) => Number.isFinite(part)) &&
+    parts[0] === 100 &&
+    parts[1] >= 64 &&
+    parts[1] <= 127;
+}
+
 function lanPriority(address) {
   if (/^192\.168\./.test(address)) {
     return 0;
@@ -38,7 +48,7 @@ function lanPriority(address) {
   return 3;
 }
 
-function detectLanHost(networkInterfaces) {
+function collectIpv4Hosts(networkInterfaces) {
   const candidates = [];
   for (const entries of Object.values(networkInterfaces || {})) {
     for (const details of entries || []) {
@@ -55,12 +65,38 @@ function detectLanHost(networkInterfaces) {
       });
     }
   }
+  return candidates;
+}
 
+function detectLanHost(networkInterfaces) {
+  const candidates = collectIpv4Hosts(networkInterfaces)
+    .filter((candidate) => !isTailscaleIpv4(candidate.address));
   if (!candidates.length) {
     return "127.0.0.1";
   }
   candidates.sort((left, right) => left.priority - right.priority);
   return candidates[0].address;
+}
+
+function detectTailscaleHost(networkInterfaces) {
+  const candidates = collectIpv4Hosts(networkInterfaces)
+    .filter((candidate) => isTailscaleIpv4(candidate.address));
+  if (!candidates.length) {
+    return "";
+  }
+  candidates.sort((left, right) => left.address.localeCompare(right.address));
+  return candidates[0].address;
+}
+
+function detectRemoteBridgeHost(networkInterfaces, networkMode = "auto") {
+  if (networkMode === "lan") {
+    return detectLanHost(networkInterfaces);
+  }
+  const tailscaleHost = detectTailscaleHost(networkInterfaces);
+  if (networkMode === "tailscale") {
+    return tailscaleHost || detectLanHost(networkInterfaces);
+  }
+  return tailscaleHost || detectLanHost(networkInterfaces);
 }
 
 function generateBridgeToken({ randomBytes } = {}) {
@@ -108,6 +144,7 @@ function buildBridgeConfig({
 
 function createAutoBridgeConfig({
   networkInterfaces,
+  networkMode = "auto",
   randomBytes,
   homeDir,
   allowedProviders = DEFAULT_ALLOWED_PROVIDERS,
@@ -118,7 +155,7 @@ function createAutoBridgeConfig({
   const os = requireNode("node:os");
   const resolvedHomeDir = homeDir || os.homedir();
   const interfaces = networkInterfaces || os.networkInterfaces();
-  const host = detectLanHost(interfaces);
+  const host = detectRemoteBridgeHost(interfaces, networkMode);
   const token = generateBridgeToken({ randomBytes });
   const bridgeSettings = buildAutoBridgeSettings({
     host,
@@ -127,7 +164,7 @@ function createAutoBridgeConfig({
     timeoutMs,
   });
   const bridgeConfig = buildBridgeConfig({
-    host,
+    host: BRIDGE_LISTEN_HOST,
     port,
     token,
     allowedProviders,
@@ -156,12 +193,16 @@ function writeBridgeConfig(configPath, config, { fs: fsImpl, path: pathImpl } = 
 
 module.exports = {
   AUTO_BRIDGE_DEFAULT_PORT,
+  BRIDGE_LISTEN_HOST,
   DEFAULT_ALLOWED_PROVIDERS,
   buildAutoBridgeSettings,
   buildBridgeConfig,
   createAutoBridgeConfig,
   defaultAutoBridgeConfigPath,
   detectLanHost,
+  detectRemoteBridgeHost,
+  detectTailscaleHost,
   generateBridgeToken,
+  isTailscaleIpv4,
   writeBridgeConfig,
 };

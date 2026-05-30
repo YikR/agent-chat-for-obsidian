@@ -8,7 +8,7 @@ const { resolveWritebackTargets } = require("./src/writebackTargets");
 const { writebackSessionResult } = require("./src/writeback");
 const { writeProviderStatusToObsidian } = require("./src/agentStatusBridge");
 const { WORKFLOW_DEFAULTS, formatTaskBoardRow, insertTaskRow } = require("./src/workflowConfig");
-const { DEFAULT_REMOTE_BRIDGE_SETTINGS, hasRemoteBridgeConfig, mergeRemoteBridgeSettings, requestBridgeTurn } = require("./src/bridgeClient");
+const { DEFAULT_REMOTE_BRIDGE_SETTINGS, hasRemoteBridgeConfig, mergeRemoteBridgeSettings, requestBridgeHealth, requestBridgeTurn } = require("./src/bridgeClient");
 const { createAutoBridgeConfig, writeBridgeConfig } = require("./src/bridgeSetup");
 const { runTurnForRuntime } = require("./src/turnTransport");
 
@@ -339,7 +339,7 @@ class AgentChatSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("一键初始化手机 Bridge")
-      .setDesc("请在桌面端执行。插件会自动识别 Mac 局域网地址、生成 token、写入 ~/.agent-chat-bridge/config.json，并把 URL/token 保存到本地插件数据；同步后手机端会自动读取。")
+      .setDesc("请在桌面端执行。插件会优先识别 Tailscale/虚拟局域网地址，未检测到时使用局域网地址；同时写入 ~/.agent-chat-bridge/config.json，并把 URL/token 保存到本地插件数据。")
       .addButton((button) => {
         button.setButtonText("初始化");
         if (this.plugin.isMobileRuntime()) {
@@ -352,8 +352,18 @@ class AgentChatSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName("检测 Bridge 可达性")
+      .setDesc("检查当前 Bridge 地址是否能访问。手机不在同一 Wi-Fi 时，建议把地址改成 Tailscale / ZeroTier / WireGuard 这类虚拟局域网地址。")
+      .addButton((button) => {
+        button.setButtonText("检测");
+        button.onClick(async () => {
+          await this.plugin.checkRemoteBridgeHealth();
+        });
+      });
+
+    new Setting(containerEl)
       .setName("Bridge 地址")
-      .setDesc("手机访问桌面 Mac 时应填写 Mac 的局域网地址，例如 http://192.168.1.2:3876。127.0.0.1 只代表当前设备；真实地址只保存在本地插件配置里。")
+      .setDesc("手机访问桌面 Mac 时可填写 Tailscale/虚拟局域网地址，例如 http://100.x.x.x:3876；同一 Wi-Fi 下也可用 Mac 局域网地址。127.0.0.1 只代表当前设备。")
       .addText((text) => {
         text.setValue(this.plugin.settings.remoteBridge.url || DEFAULT_REMOTE_BRIDGE_SETTINGS.url).onChange(async (value) => {
           this.plugin.settings.remoteBridge.url = value.trim();
@@ -861,6 +871,19 @@ module.exports = class AgentChatPlugin extends Plugin {
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
       new Notice(`初始化手机 Bridge 失败：${message}`);
+    }
+  }
+
+  async checkRemoteBridgeHealth() {
+    try {
+      const result = await requestBridgeHealth({
+        bridge: this.settings.remoteBridge,
+      });
+      const providers = (result.providers || []).join(" / ") || "未返回 provider 列表";
+      new Notice(`Bridge 可达：${result.name}；providers：${providers}`);
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      new Notice(`Bridge 不可达：${message}`);
     }
   }
 

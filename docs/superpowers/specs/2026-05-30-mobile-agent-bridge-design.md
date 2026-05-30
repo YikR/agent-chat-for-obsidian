@@ -189,6 +189,20 @@ Mobile behavior stays simple:
 
 Project rule from v0.7.1 onward: every Agent Chat change must consider and document both desktop and mobile behavior.
 
+## 2026-05-30 v0.7.2 Remote Network Mode
+
+The first auto setup only handled the current Wi-Fi/LAN address well. Off-LAN mobile use needs a stable private route, not a public unauthenticated Bridge.
+
+The selected approach is virtual-LAN first:
+
+- Prefer Tailscale `100.64.0.0/10` IPv4 addresses during desktop auto setup.
+- Fall back to the ordinary LAN IPv4 address when no Tailscale address is present.
+- Write the Bridge server listen host as `0.0.0.0` so the same desktop Bridge process can accept both Wi-Fi LAN and Tailscale/virtual-LAN traffic.
+- Keep the phone-facing URL in plugin `remoteBridge.url`; mobile only uses that synced URL and token.
+- Add a health check button that calls `GET /v1/health` without sending the bearer token, so desktop or mobile can verify whether the current URL is reachable.
+
+This does not add public relay or Cloudflare Tunnel defaults. If a public tunnel is added later, it must include explicit access control beyond the bearer token.
+
 ## Plugin Settings
 
 Add a `remoteBridge` setting group:

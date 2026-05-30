@@ -21,7 +21,8 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - 支持 `Codex`、`Claude`、`Hermes`、`OpenClaw` 四个 provider
 - 支持手机端 Obsidian 安装和加载
 - 手机端默认 Bridge 优先：填写桌面 Mac Bridge URL/token 后可远程执行 Agent
-- 桌面端设置页支持一键初始化手机 Bridge：自动识别局域网 IP、生成 token、写入桌面 Bridge config，并把 URL/token 保存到本地插件数据供手机端同步读取
+- 桌面端设置页支持一键初始化手机 Bridge：优先识别 Tailscale/虚拟局域网地址，未检测到时使用局域网 IP，生成 token、写入桌面 Bridge config，并把 URL/token 保存到本地插件数据供手机端同步读取
+- 设置页支持 `检测 Bridge 可达性`，用于在桌面端或手机端确认当前 Bridge URL 是否能访问
 - 手机端未填写 Bridge token 时提供移动工作台模式：查看会话、绑定项目、写回、导出、派单
 - 每个会话可绑定 Obsidian 项目页
 - 支持会话标题编辑
@@ -61,6 +62,7 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - 桌面端可在插件设置页点击 `一键初始化手机 Bridge`，自动生成 `~/.agent-chat-bridge/config.json` 并保存手机端要读取的 URL/token。
 - 手机端未填写 Bridge token：可查看会话、写回、导出、派单到任务板，但不会直接运行本地 CLI。
 - 手机端已填写 Bridge URL/token：通过桌面 Mac 的 Agent Chat Bridge 远程执行 agent，然后把回复写入同一个会话。
+- 手机和 Mac 不在同一 Wi-Fi 时，建议使用 Tailscale / ZeroTier / WireGuard 这类虚拟局域网地址；插件会优先识别 Tailscale `100.x.x.x` 地址。
 
 推荐初始化方式：
 
@@ -68,6 +70,7 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 2. 点击 `一键初始化手机 Bridge`。
 3. 在这个仓库目录运行 `npm run bridge`。
 4. 等 Obsidian/iCloud 同步插件数据后，手机端会自动读取 Bridge URL/token。
+5. 在手机端或桌面端点击 `检测 Bridge 可达性`，确认当前网络下 URL 能访问。
 
 手动配置方式：
 
@@ -75,7 +78,7 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 mkdir -p ~/.agent-chat-bridge
 cat > ~/.agent-chat-bridge/config.json <<'JSON'
 {
-  "host": "192.168.1.2",
+  "host": "0.0.0.0",
   "port": 3876,
   "token": "replace-with-a-random-token",
   "allowedProviders": ["codex", "claude", "hermes", "openclaw"],
@@ -85,7 +88,9 @@ JSON
 npm run bridge
 ```
 
-手机访问时，`host` 必须是桌面 Mac 的局域网 IP；`127.0.0.1` 只代表当前设备。插件默认倾向使用 Bridge，但真实 URL/token 只保存在你的本地插件配置里。不要把 Bridge 暴露到公网；第一版只支持可信局域网使用。
+手动配置时，Bridge config 里的 `host` 建议保持 `0.0.0.0` 作为监听地址；手机端真正访问的地址填写在插件设置的 `Bridge 地址` 中，例如 `http://100.x.x.x:3876` 或 `http://192.168.1.2:3876`。`127.0.0.1` 只代表当前设备。插件默认倾向使用 Bridge，但真实 URL/token 只保存在你的本地插件配置里。不要把 Bridge 暴露到公网；第一版只支持可信局域网或虚拟局域网使用。
+
+`v0.7.2` 起，自动初始化写入的 Bridge 服务端监听地址为 `0.0.0.0`，这样同一个 Bridge 进程可以同时接受 Wi-Fi 局域网和 Tailscale/虚拟局域网流量；手机端实际访问哪个地址由插件设置里的 `Bridge 地址` 决定。不要把这个端口直接暴露到公网。
 
 ### 原生续接说明
 
