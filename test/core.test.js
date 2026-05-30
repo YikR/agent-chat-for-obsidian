@@ -24,6 +24,7 @@ const {
   requestBridgeTurn,
 } = require("../src/bridgeClient");
 const { createBridgeServer, DEFAULT_BRIDGE_CONFIG } = require("../src/bridgeServer");
+const { runTurnForRuntime } = require("../src/turnTransport");
 
 function listen(server) {
   return new Promise((resolve) => {
@@ -513,6 +514,90 @@ test("bridge server executes turn through injected provider runner", async () =>
   } finally {
     await closeServer(server);
   }
+});
+
+test("runTurnForRuntime uses local runner on desktop", async () => {
+  const calls = [];
+  const result = await runTurnForRuntime({
+    isMobile: false,
+    providerId: "codex",
+    session: createSession({ id: "session-desktop", providerId: "codex", title: "Desktop" }),
+    userInput: "run locally",
+    settings: {
+      providers: { codex: { enabled: true } },
+      remoteBridge: {
+        enabled: true,
+        url: "http://127.0.0.1:3876",
+        token: "secret",
+        timeoutMs: 1000,
+      },
+    },
+    cwd: "/Users/yanyunuo",
+    localRunner: async (providerId, session, userInput, settings, options) => {
+      calls.push({ providerId, session, userInput, settings, options });
+      return { assistantText: "LOCAL", command: "codex exec -" };
+    },
+    remoteRunner: async () => ({ assistantText: "REMOTE", command: "bridge" }),
+  });
+
+  assert.equal(result.transport, "local");
+  assert.equal(result.assistantText, "LOCAL");
+  assert.equal(calls[0].options.cwd, "/Users/yanyunuo");
+});
+
+test("runTurnForRuntime uses remote bridge on configured mobile", async () => {
+  const calls = [];
+  const result = await runTurnForRuntime({
+    isMobile: true,
+    providerId: "codex",
+    session: createSession({ id: "session-mobile-remote", providerId: "codex", title: "Mobile" }),
+    userInput: "run remote",
+    settings: {
+      providers: { codex: { enabled: true } },
+      remoteBridge: {
+        enabled: true,
+        url: "http://127.0.0.1:3876",
+        token: "secret",
+        timeoutMs: 1000,
+      },
+    },
+    cwd: "/Users/yanyunuo",
+    localRunner: async () => ({ assistantText: "LOCAL", command: "codex exec -" }),
+    remoteRunner: async (request) => {
+      calls.push(request);
+      return { assistantText: "REMOTE", command: "bridge" };
+    },
+  });
+
+  assert.equal(result.transport, "remote");
+  assert.equal(result.assistantText, "REMOTE");
+  assert.equal(calls[0].providerId, "codex");
+  assert.equal(calls[0].bridge.token, "secret");
+});
+
+test("runTurnForRuntime returns unavailable on mobile when default bridge lacks token", async () => {
+  const result = await runTurnForRuntime({
+    isMobile: true,
+    providerId: "codex",
+    session: createSession({ id: "session-mobile-disabled", providerId: "codex", title: "Mobile" }),
+    userInput: "run unavailable",
+    settings: {
+      providers: { codex: { enabled: true } },
+      remoteBridge: {
+        enabled: true,
+        url: "http://127.0.0.1:3876",
+        token: "",
+        timeoutMs: 1000,
+      },
+    },
+    cwd: "/Users/yanyunuo",
+    localRunner: async () => ({ assistantText: "LOCAL", command: "codex exec -" }),
+    remoteRunner: async () => ({ assistantText: "REMOTE", command: "bridge" }),
+  });
+
+  assert.equal(result.transport, "unavailable");
+  assert.equal(result.assistantText, "");
+  assert.equal(result.command, "");
 });
 
 test("createSpawnSpec builds a claude print command", () => {
