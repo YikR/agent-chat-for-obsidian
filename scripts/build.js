@@ -9,6 +9,7 @@ const MODULES = [
   ["./src/sessionRegistry", "src/sessionRegistry.js"],
   ["./src/providers", "src/providers.js"],
   ["./src/bridgeClient", "src/bridgeClient.js"],
+  ["./src/bridgeSetup", "src/bridgeSetup.js"],
   ["./src/turnTransport", "src/turnTransport.js"],
   ["./src/sessionExport", "src/sessionExport.js"],
   ["./src/providerStatus", "src/providerStatus.js"],

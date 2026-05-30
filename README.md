@@ -21,6 +21,7 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - 支持 `Codex`、`Claude`、`Hermes`、`OpenClaw` 四个 provider
 - 支持手机端 Obsidian 安装和加载
 - 手机端默认 Bridge 优先：填写桌面 Mac Bridge URL/token 后可远程执行 Agent
+- 桌面端设置页支持一键初始化手机 Bridge：自动识别局域网 IP、生成 token、写入桌面 Bridge config，并把 URL/token 保存到本地插件数据供手机端同步读取
 - 手机端未填写 Bridge token 时提供移动工作台模式：查看会话、绑定项目、写回、导出、派单
 - 每个会话可绑定 Obsidian 项目页
 - 支持会话标题编辑
@@ -57,16 +58,24 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 
 - 桌面端：默认直接运行本机 `codex / claude / hermes / openclaw` CLI。
 - 手机端默认 Bridge 优先：插件设置里默认启用手机端远程执行，但不会内置真实 URL/token。
+- 桌面端可在插件设置页点击 `一键初始化手机 Bridge`，自动生成 `~/.agent-chat-bridge/config.json` 并保存手机端要读取的 URL/token。
 - 手机端未填写 Bridge token：可查看会话、写回、导出、派单到任务板，但不会直接运行本地 CLI。
 - 手机端已填写 Bridge URL/token：通过桌面 Mac 的 Agent Chat Bridge 远程执行 agent，然后把回复写入同一个会话。
 
-启动桌面 Bridge：
+推荐初始化方式：
+
+1. 在桌面端 Obsidian 打开 `Agent Chat` 插件设置。
+2. 点击 `一键初始化手机 Bridge`。
+3. 在这个仓库目录运行 `npm run bridge`。
+4. 等 Obsidian/iCloud 同步插件数据后，手机端会自动读取 Bridge URL/token。
+
+手动配置方式：
 
 ```bash
 mkdir -p ~/.agent-chat-bridge
 cat > ~/.agent-chat-bridge/config.json <<'JSON'
 {
-  "host": "127.0.0.1",
+  "host": "192.168.1.2",
   "port": 3876,
   "token": "replace-with-a-random-token",
   "allowedProviders": ["codex", "claude", "hermes", "openclaw"],
@@ -76,7 +85,7 @@ JSON
 npm run bridge
 ```
 
-手机访问时，把 `host` 改成桌面 Mac 的局域网 IP，并在插件设置中填写同样的 URL 和 token。插件默认倾向使用 Bridge，但真实 URL/token 只保存在你的本地插件配置里。不要把 Bridge 暴露到公网；第一版只支持可信局域网使用。
+手机访问时，`host` 必须是桌面 Mac 的局域网 IP；`127.0.0.1` 只代表当前设备。插件默认倾向使用 Bridge，但真实 URL/token 只保存在你的本地插件配置里。不要把 Bridge 暴露到公网；第一版只支持可信局域网使用。
 
 ### 原生续接说明
 

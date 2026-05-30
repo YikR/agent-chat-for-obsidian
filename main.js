@@ -9,6 +9,7 @@ const { writebackSessionResult } = require("./src/writeback");
 const { writeProviderStatusToObsidian } = require("./src/agentStatusBridge");
 const { WORKFLOW_DEFAULTS, formatTaskBoardRow, insertTaskRow } = require("./src/workflowConfig");
 const { DEFAULT_REMOTE_BRIDGE_SETTINGS, hasRemoteBridgeConfig, mergeRemoteBridgeSettings, requestBridgeTurn } = require("./src/bridgeClient");
+const { createAutoBridgeConfig, writeBridgeConfig } = require("./src/bridgeSetup");
 const { runTurnForRuntime } = require("./src/turnTransport");
 
 const VIEW_TYPE_AGENT_CHAT = "agent-chat-view";
@@ -333,6 +334,20 @@ class AgentChatSettingTab extends PluginSettingTab {
         toggle.setValue(this.plugin.settings.remoteBridge.enabled).onChange(async (value) => {
           this.plugin.settings.remoteBridge.enabled = value;
           await this.plugin.persist();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("一键初始化手机 Bridge")
+      .setDesc("请在桌面端执行。插件会自动识别 Mac 局域网地址、生成 token、写入 ~/.agent-chat-bridge/config.json，并把 URL/token 保存到本地插件数据；同步后手机端会自动读取。")
+      .addButton((button) => {
+        button.setButtonText("初始化");
+        if (this.plugin.isMobileRuntime()) {
+          button.setDisabled(true);
+        }
+        button.onClick(async () => {
+          await this.plugin.initializeMobileBridge();
+          this.display();
         });
       });
 
@@ -817,6 +832,36 @@ module.exports = class AgentChatPlugin extends Plugin {
 
   getProviderIds() {
     return Object.keys(this.settings.providers || {});
+  }
+
+  getPreferredBridgeCwd() {
+    const codex = (this.settings.providers || {}).codex || {};
+    return String(codex.cwd || "").trim() || "";
+  }
+
+  async initializeMobileBridge() {
+    if (this.isMobileRuntime()) {
+      new Notice("请在桌面端 Obsidian 初始化手机 Bridge");
+      return;
+    }
+
+    try {
+      const result = createAutoBridgeConfig({
+        allowedProviders: this.getProviderIds(),
+        defaultCwd: this.getPreferredBridgeCwd() || undefined,
+      });
+      writeBridgeConfig(result.configPath, result.bridgeConfig);
+      this.settings.remoteBridge = {
+        ...mergeRemoteBridgeSettings(this.settings.remoteBridge),
+        ...result.bridgeSettings,
+      };
+      await this.persist();
+      await this.refreshOpenViews();
+      new Notice(`已初始化手机 Bridge：${result.bridgeSettings.url}。桌面端运行 npm run bridge 后，手机端会读取同步配置。`);
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      new Notice(`初始化手机 Bridge 失败：${message}`);
+    }
   }
 
   async refreshOpenViews() {

@@ -169,6 +169,26 @@ Example:
 
 For real phone access, the user can set `host` to the Mac LAN IP after confirming the network is trusted. The README must state that `127.0.0.1` only works from the Mac itself, not from the phone.
 
+## 2026-05-30 v0.7.1 Auto Setup
+
+The mobile side should not try to discover the desktop Mac by itself. Instead, desktop Obsidian owns Bridge initialization because it has access to macOS network interfaces and the local filesystem.
+
+Desktop settings add `一键初始化手机 Bridge`:
+
+- Detect the preferred non-internal IPv4 LAN address.
+- Generate a 32-byte random hex token.
+- Write `~/.agent-chat-bridge/config.json` with host, port, token, allowed providers, and default cwd.
+- Save the matching `remoteBridge.url` and `remoteBridge.token` into plugin data so Obsidian/iCloud sync can carry it to mobile.
+
+Mobile behavior stays simple:
+
+- Read the synced plugin settings.
+- Use Bridge only when URL and token are complete.
+- Keep the existing mobile workbench/fallback if config is incomplete.
+- Never run local CLI detection on mobile.
+
+Project rule from v0.7.1 onward: every Agent Chat change must consider and document both desktop and mobile behavior.
+
 ## Plugin Settings
 
 Add a `remoteBridge` setting group:

@@ -1,5 +1,12 @@
 # 变更记录
 
+## 0.7.1 - 2026-05-30
+
+- 新增桌面端 `一键初始化手机 Bridge`：自动识别 Mac 局域网 IP、生成随机 token、写入 `~/.agent-chat-bridge/config.json`，并把手机端需要的 URL/token 保存到本地插件数据。
+- 手机端继续只读取同步后的 Bridge 配置；不在手机端探测 Mac 网络或运行本地 CLI。
+- 新增项目级 `AGENTS.md` 规则：后续插件更新必须同时说明并验证 desktop 与 mobile 行为。
+- 新增自动 Bridge 配置测试和打包测试，避免移动端加载路径回退。
+
 ## 0.7.0 - 2026-05-30
 
 - 手机端默认启用桌面 Agent Chat Bridge 偏好，填写本地 URL/token 后可通过桌面 Mac 远程执行 Agent。

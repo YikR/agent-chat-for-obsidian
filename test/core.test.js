@@ -23,6 +23,12 @@ const {
   mergeRemoteBridgeSettings,
   requestBridgeTurn,
 } = require("../src/bridgeClient");
+const {
+  AUTO_BRIDGE_DEFAULT_PORT,
+  createAutoBridgeConfig,
+  detectLanHost,
+  generateBridgeToken,
+} = require("../src/bridgeSetup");
 const { createBridgeServer, DEFAULT_BRIDGE_CONFIG } = require("../src/bridgeServer");
 const { runTurnForRuntime } = require("../src/turnTransport");
 
@@ -378,6 +384,54 @@ test("requestBridgeTurn converts bridge failures into readable errors", async ()
     }),
     /Bridge request failed \(401\): Unauthorized/,
   );
+});
+
+test("detectLanHost prefers a private non-internal IPv4 address", () => {
+  const host = detectLanHost({
+    lo0: [{ family: "IPv4", address: "127.0.0.1", internal: true }],
+    en5: [{ family: "IPv4", address: "10.0.0.24", internal: false }],
+    en0: [{ family: "IPv4", address: "192.168.31.22", internal: false }],
+  });
+
+  assert.equal(host, "192.168.31.22");
+});
+
+test("detectLanHost falls back to localhost without a LAN address", () => {
+  const host = detectLanHost({
+    lo0: [{ family: "IPv4", address: "127.0.0.1", internal: true }],
+    utun0: [{ family: "IPv6", address: "fe80::1", internal: false }],
+  });
+
+  assert.equal(host, "127.0.0.1");
+});
+
+test("createAutoBridgeConfig creates synced mobile settings and desktop config", () => {
+  const result = createAutoBridgeConfig({
+    networkInterfaces: {
+      en0: [{ family: "IPv4", address: "192.168.31.22", internal: false }],
+    },
+    randomBytes: (size) => Buffer.alloc(size, 0xab),
+    homeDir: "/Users/yanyunuo",
+    allowedProviders: ["codex", "openclaw"],
+    defaultCwd: "/Users/yanyunuo",
+  });
+
+  assert.equal(AUTO_BRIDGE_DEFAULT_PORT, 3876);
+  assert.equal(generateBridgeToken({ randomBytes: (size) => Buffer.alloc(size, 0xcd) }), "cd".repeat(32));
+  assert.deepEqual(result.bridgeSettings, {
+    enabled: true,
+    url: "http://192.168.31.22:3876",
+    token: "ab".repeat(32),
+    timeoutMs: DEFAULT_REMOTE_BRIDGE_SETTINGS.timeoutMs,
+  });
+  assert.deepEqual(result.bridgeConfig, {
+    host: "192.168.31.22",
+    port: 3876,
+    token: "ab".repeat(32),
+    allowedProviders: ["codex", "openclaw"],
+    defaultCwd: "/Users/yanyunuo",
+  });
+  assert.equal(result.configPath, "/Users/yanyunuo/.agent-chat-bridge/config.json");
 });
 
 test("createBridgeServer exposes health with configured providers", async () => {
@@ -843,6 +897,16 @@ test("provider module does not import desktop-only Node APIs at module load", ()
   assert.doesNotMatch(topLevel, /node:path/);
 });
 
+test("bridge setup module keeps desktop-only Node APIs behind functions", () => {
+  const source = fs.readFileSync("src/bridgeSetup.js", "utf8");
+  const topLevel = source.slice(0, source.indexOf("function requireNode"));
+
+  assert.doesNotMatch(topLevel, /node:crypto/);
+  assert.doesNotMatch(topLevel, /node:fs/);
+  assert.doesNotMatch(topLevel, /node:os/);
+  assert.doesNotMatch(topLevel, /node:path/);
+});
+
 test("manifest allows mobile Obsidian installation", () => {
   const manifest = JSON.parse(fs.readFileSync("manifest.json", "utf8"));
 
@@ -896,6 +960,14 @@ test("settings UI exposes default-enabled mobile bridge configuration", () => {
   assert.match(source, /inputEl\.type = "password"/);
 });
 
+test("settings UI exposes one-click mobile bridge initialization", () => {
+  const source = fs.readFileSync("main.js", "utf8");
+
+  assert.match(source, /createAutoBridgeConfig/);
+  assert.match(source, /一键初始化手机 Bridge/);
+  assert.match(source, /initializeMobileBridge/);
+});
+
 test("sendMessageToActiveSession routes through runtime transport", () => {
   const source = fs.readFileSync("main.js", "utf8");
 
@@ -910,7 +982,16 @@ test("build script bundles mobile bridge runtime modules", () => {
   const source = fs.readFileSync("scripts/build.js", "utf8");
 
   assert.match(source, /\["\.\/src\/bridgeClient", "src\/bridgeClient\.js"\]/);
+  assert.match(source, /\["\.\/src\/bridgeSetup", "src\/bridgeSetup\.js"\]/);
   assert.match(source, /\["\.\/src\/turnTransport", "src\/turnTransport\.js"\]/);
+});
+
+test("project instructions require desktop and mobile changes together", () => {
+  const source = fs.readFileSync("AGENTS.md", "utf8");
+
+  assert.match(source, /手机端和桌面端更新必须同时适配/);
+  assert.match(source, /desktop/);
+  assert.match(source, /mobile/);
 });
 
 test("renderProviderStatusBlock creates a workflow-readable status table", () => {
