@@ -20,7 +20,8 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - 多 tab、多会话、本地持久化
 - 支持 `Codex`、`Claude`、`Hermes`、`OpenClaw` 四个 provider
 - 支持手机端 Obsidian 安装和加载
-- 手机端提供移动工作台模式：查看会话、绑定项目、写回、导出、派单
+- 手机端默认 Bridge 优先：填写桌面 Mac Bridge URL/token 后可远程执行 Agent
+- 手机端未填写 Bridge token 时提供移动工作台模式：查看会话、绑定项目、写回、导出、派单
 - 每个会话可绑定 Obsidian 项目页
 - 支持会话标题编辑
 - 支持手动写回和自动写回
@@ -41,32 +42,41 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 - 自动写回和手动写回进入后台队列，不阻塞对话区最终结果显示
 - 支持 provider 原生续接：OpenClaw 固定 `session-key`，Claude 固定 `session-id`，Hermes 固定 `--continue` 会话名
 - `检测全部 Agent` 会并行检测，减少等待时间
+- 设置页可配置手机端桌面 Bridge 的启用状态、地址、token 和超时
 - 设置页可配置每个 provider 的 CLI 路径、工作目录、额外参数、原生续接和启用状态
 
 ## 当前边界
 
-这版已经完成插件壳、会话状态、CLI adapter、移动端加载适配和 Obsidian 写回桥，但每个 provider 的真实可用性仍取决于本机环境。
+这版已经完成插件壳、会话状态、CLI adapter、移动端加载适配、桌面 Bridge 和 Obsidian 写回桥，但每个 provider 的真实可用性仍取决于桌面 Mac 的本机 CLI、模型配置和网络环境。
 
-在当前实现机器上的首轮冒烟结果：
-
-- `Codex`：受本地 app-server 权限初始化阻塞
-- `OpenClaw`：非沙盒环境下最小调用可返回 JSON；插件已支持从 `payloads[].text` 提取回复
-- `Hermes`：这轮没有形成可用助手返回
-- `Claude`：当前本机 `claude -p` 直接调用会长时间无返回，需要单独联调 Claude CLI 运行态
-
-因此当前结论是：插件已经可安装、可打开、可管理会话；四个 provider 的本机运行链还需要逐个联调。
+桌面端默认直接运行本机 `codex / claude / hermes / openclaw` CLI。手机端不能直接 spawn macOS CLI，因此会通过桌面 Bridge 远程执行；如果 Bridge URL/token 未填写，则保留工作台与派单兜底。
 
 ### 手机端说明
 
-手机端 Obsidian 不能直接运行 macOS 上的 `codex / claude / hermes / openclaw` CLI，因此插件在手机上会自动进入移动工作台模式：
+插件同时适配桌面端和手机端，但两端执行方式不同：
 
-- 可以打开插件、查看和管理会话
-- 可以绑定当前笔记或项目页
-- 可以写回、导出、派单到 Agent任务板
-- 不能直接检测或运行本地 CLI Agent
-- 在手机端发送输入时，插件会把输入记录进会话，并提示回桌面端继续执行或派单到任务板
+- 桌面端：默认直接运行本机 `codex / claude / hermes / openclaw` CLI。
+- 手机端默认 Bridge 优先：插件设置里默认启用手机端远程执行，但不会内置真实 URL/token。
+- 手机端未填写 Bridge token：可查看会话、写回、导出、派单到任务板，但不会直接运行本地 CLI。
+- 手机端已填写 Bridge URL/token：通过桌面 Mac 的 Agent Chat Bridge 远程执行 agent，然后把回复写入同一个会话。
 
-如果后续要在手机端真正触发 agent 执行，需要另加一个桌面 Mac 上运行的 HTTP bridge；手机插件通过局域网或公网安全入口调用这个 bridge。
+启动桌面 Bridge：
+
+```bash
+mkdir -p ~/.agent-chat-bridge
+cat > ~/.agent-chat-bridge/config.json <<'JSON'
+{
+  "host": "127.0.0.1",
+  "port": 3876,
+  "token": "replace-with-a-random-token",
+  "allowedProviders": ["codex", "claude", "hermes", "openclaw"],
+  "defaultCwd": "/Users/yanyunuo"
+}
+JSON
+npm run bridge
+```
+
+手机访问时，把 `host` 改成桌面 Mac 的局域网 IP，并在插件设置中填写同样的 URL 和 token。插件默认倾向使用 Bridge，但真实 URL/token 只保存在你的本地插件配置里。不要把 Bridge 暴露到公网；第一版只支持可信局域网使用。
 
 ### 原生续接说明
 

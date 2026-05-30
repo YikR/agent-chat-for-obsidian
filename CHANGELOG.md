@@ -1,5 +1,12 @@
 # 变更记录
 
+## 0.7.0 - 2026-05-30
+
+- 手机端默认启用桌面 Agent Chat Bridge 偏好，填写本地 URL/token 后可通过桌面 Mac 远程执行 Agent。
+- 桌面端继续默认使用现有本地 CLI 执行路径，不强制经过 Bridge。
+- 新增 Bridge URL、Token 和超时设置；真实局域网地址和 token 只保存在本地配置，不进入公开仓库或 release。
+- 新增 Bridge client、Bridge server、桌面/手机端运行路由测试。
+
 ## 0.6.3 - 2026-05-30
 
 - 新增 Codex 专用权限模式设置，可显式选择 `workspace-write`、`danger-full-access` 或“跳过审批和沙盒”。
