@@ -32,6 +32,7 @@ async function runTurnForRuntime({
       assistantText: result.assistantText || "",
       command: result.command || "",
       providerId: result.providerId || providerId,
+      selectedBridgeUrl: result.selectedUrl || "",
     };
   }
 

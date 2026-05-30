@@ -99,6 +99,30 @@ function detectRemoteBridgeHost(networkInterfaces, networkMode = "auto") {
   return tailscaleHost || detectLanHost(networkInterfaces);
 }
 
+function detectRemoteBridgeHosts(networkInterfaces, networkMode = "auto") {
+  const hosts = [];
+  const addHost = (host) => {
+    if (host && !hosts.includes(host)) {
+      hosts.push(host);
+    }
+  };
+  const lanHost = detectLanHost(networkInterfaces);
+  const tailscaleHost = detectTailscaleHost(networkInterfaces);
+
+  if (networkMode === "lan") {
+    addHost(lanHost);
+    return hosts;
+  }
+  if (networkMode === "tailscale") {
+    addHost(tailscaleHost);
+    addHost(lanHost);
+    return hosts;
+  }
+  addHost(tailscaleHost);
+  addHost(lanHost);
+  return hosts;
+}
+
 function generateBridgeToken({ randomBytes } = {}) {
   const bytes = (randomBytes || requireNode("node:crypto").randomBytes)(32);
   return Buffer.from(bytes).toString("hex");
@@ -112,13 +136,17 @@ function defaultAutoBridgeConfigPath(homeDir) {
 
 function buildAutoBridgeSettings({
   host,
+  hosts,
   port = AUTO_BRIDGE_DEFAULT_PORT,
   token,
   timeoutMs = DEFAULT_REMOTE_BRIDGE_SETTINGS.timeoutMs,
 }) {
+  const resolvedHosts = Array.isArray(hosts) && hosts.length ? hosts : [host];
+  const urls = resolvedHosts.map((candidate) => `http://${candidate}:${port}`);
   return {
     enabled: true,
-    url: `http://${host}:${port}`,
+    url: urls[0],
+    urls,
     token,
     timeoutMs,
   };
@@ -155,10 +183,10 @@ function createAutoBridgeConfig({
   const os = requireNode("node:os");
   const resolvedHomeDir = homeDir || os.homedir();
   const interfaces = networkInterfaces || os.networkInterfaces();
-  const host = detectRemoteBridgeHost(interfaces, networkMode);
+  const hosts = detectRemoteBridgeHosts(interfaces, networkMode);
   const token = generateBridgeToken({ randomBytes });
   const bridgeSettings = buildAutoBridgeSettings({
-    host,
+    hosts,
     port,
     token,
     timeoutMs,
@@ -201,6 +229,7 @@ module.exports = {
   defaultAutoBridgeConfigPath,
   detectLanHost,
   detectRemoteBridgeHost,
+  detectRemoteBridgeHosts,
   detectTailscaleHost,
   generateBridgeToken,
   isTailscaleIpv4,

@@ -19,6 +19,7 @@ const { renderProviderStatusBlock, replaceOrAppendMarker, STATUS_MARKER } = requ
 const {
   DEFAULT_REMOTE_BRIDGE_SETTINGS,
   buildBridgeTurnPayload,
+  getBridgeCandidateUrls,
   hasRemoteBridgeConfig,
   mergeRemoteBridgeSettings,
   requestBridgeHealth,
@@ -30,6 +31,7 @@ const {
   createAutoBridgeConfig,
   detectLanHost,
   detectRemoteBridgeHost,
+  detectRemoteBridgeHosts,
   detectTailscaleHost,
   generateBridgeToken,
 } = require("../src/bridgeSetup");
@@ -288,6 +290,26 @@ test("hasRemoteBridgeConfig requires enabled url and token", () => {
   }), false);
 });
 
+test("getBridgeCandidateUrls keeps current url first and removes duplicates", () => {
+  const urls = getBridgeCandidateUrls({
+    enabled: true,
+    url: " http://192.168.28.42:3876/ ",
+    urls: [
+      "http://x-5.tailc1b10e.ts.net:3876",
+      "http://192.168.28.42:3876",
+      "",
+      "http://x-5.tailc1b10e.ts.net:3876/",
+    ],
+    token: "secret",
+    timeoutMs: 1000,
+  });
+
+  assert.deepEqual(urls, [
+    "http://192.168.28.42:3876",
+    "http://x-5.tailc1b10e.ts.net:3876",
+  ]);
+});
+
 test("buildBridgeTurnPayload sends only provider turn data", () => {
   const session = createSession({
     id: "session-mobile",
@@ -357,9 +379,56 @@ test("requestBridgeTurn sends bearer token and parses success", async () => {
   });
 
   assert.equal(result.assistantText, "OK");
+  assert.equal(result.selectedUrl, "http://127.0.0.1:3876");
   assert.equal(calls[0].url, "http://127.0.0.1:3876/v1/turn");
   assert.equal(calls[0].options.headers.Authorization, "Bearer secret");
   assert.equal(calls[0].options.headers["Content-Type"], "application/json");
+});
+
+test("requestBridgeTurn falls back to the next candidate url", async () => {
+  const calls = [];
+  const result = await requestBridgeTurn({
+    bridge: {
+      enabled: true,
+      url: "http://192.168.28.42:3876",
+      urls: [
+        "http://192.168.28.42:3876",
+        "http://x-5.tailc1b10e.ts.net:3876",
+      ],
+      token: "secret",
+      timeoutMs: 1000,
+    },
+    providerId: "codex",
+    session: createSession({ id: "session-remote-fallback", providerId: "codex", title: "Remote" }),
+    userInput: "run remote",
+    settings: { providers: { codex: { enabled: true } } },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      if (url.startsWith("http://192.168.28.42:3876")) {
+        throw new Error("LAN unreachable");
+      }
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            ok: true,
+            assistantText: "REMOTE",
+            command: "bridge",
+            providerId: "codex",
+          };
+        },
+      };
+    },
+    AbortControllerImpl: AbortController,
+  });
+
+  assert.equal(result.assistantText, "REMOTE");
+  assert.equal(result.selectedUrl, "http://x-5.tailc1b10e.ts.net:3876");
+  assert.deepEqual(calls.map((call) => call.url), [
+    "http://192.168.28.42:3876/v1/turn",
+    "http://x-5.tailc1b10e.ts.net:3876/v1/turn",
+  ]);
 });
 
 test("requestBridgeTurn converts bridge failures into readable errors", async () => {
@@ -417,6 +486,10 @@ test("detectRemoteBridgeHost prefers Tailscale over LAN for off-LAN mobile acces
 
   assert.equal(detectTailscaleHost(networkInterfaces), "100.89.12.34");
   assert.equal(detectRemoteBridgeHost(networkInterfaces), "100.89.12.34");
+  assert.deepEqual(detectRemoteBridgeHosts(networkInterfaces), [
+    "100.89.12.34",
+    "192.168.31.22",
+  ]);
 });
 
 test("createAutoBridgeConfig creates synced mobile settings and desktop config", () => {
@@ -436,6 +509,10 @@ test("createAutoBridgeConfig creates synced mobile settings and desktop config",
   assert.deepEqual(result.bridgeSettings, {
     enabled: true,
     url: "http://100.89.12.34:3876",
+    urls: [
+      "http://100.89.12.34:3876",
+      "http://192.168.31.22:3876",
+    ],
     token: "ab".repeat(32),
     timeoutMs: DEFAULT_REMOTE_BRIDGE_SETTINGS.timeoutMs,
   });
@@ -496,6 +573,46 @@ test("requestBridgeHealth checks bridge reachability without exposing token", as
   assert.deepEqual(result.providers, ["codex", "openclaw"]);
 });
 
+test("requestBridgeHealth falls back to the next candidate url", async () => {
+  const calls = [];
+  const result = await requestBridgeHealth({
+    bridge: {
+      enabled: true,
+      url: "http://192.168.28.42:3876",
+      urls: [
+        "http://192.168.28.42:3876",
+        "http://x-5.tailc1b10e.ts.net:3876",
+      ],
+      token: "secret",
+      timeoutMs: 600000,
+    },
+    fetchImpl: async (url) => {
+      calls.push(url);
+      if (url.startsWith("http://192.168.28.42:3876")) {
+        throw new Error("LAN health unreachable");
+      }
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            ok: true,
+            name: "agent-chat-bridge",
+            providers: ["codex"],
+          };
+        },
+      };
+    },
+    AbortControllerImpl: AbortController,
+  });
+
+  assert.equal(result.selectedUrl, "http://x-5.tailc1b10e.ts.net:3876");
+  assert.deepEqual(calls, [
+    "http://192.168.28.42:3876/v1/health",
+    "http://x-5.tailc1b10e.ts.net:3876/v1/health",
+  ]);
+});
+
 test("requestBridgeHealth reports unreachable bridge clearly", async () => {
   await assert.rejects(
     () => requestBridgeHealth({
@@ -544,11 +661,48 @@ test("requestBridgeTurnProbe validates authenticated POST without running an age
   const body = JSON.parse(calls[0].options.body);
   assert.equal(result.ok, true);
   assert.equal(result.status, 403);
+  assert.equal(result.selectedUrl, "http://100.89.12.34:3876");
   assert.equal(calls[0].url, "http://100.89.12.34:3876/v1/turn");
   assert.equal(calls[0].options.method, "POST");
   assert.equal(calls[0].options.headers.Authorization, "Bearer secret");
   assert.equal(calls[0].options.headers["Content-Type"], "application/json");
   assert.equal(body.providerId, "__agent_chat_probe__");
+});
+
+test("requestBridgeTurnProbe falls back to the next candidate url", async () => {
+  const calls = [];
+  const result = await requestBridgeTurnProbe({
+    bridge: {
+      enabled: true,
+      url: "http://192.168.28.42:3876",
+      urls: [
+        "http://192.168.28.42:3876",
+        "http://x-5.tailc1b10e.ts.net:3876",
+      ],
+      token: "secret",
+      timeoutMs: 600000,
+    },
+    fetchImpl: async (url) => {
+      calls.push(url);
+      if (url.startsWith("http://192.168.28.42:3876")) {
+        throw new Error("LAN probe unreachable");
+      }
+      return {
+        ok: false,
+        status: 403,
+        async json() {
+          return { ok: false, error: "Provider is not allowed: __agent_chat_probe__" };
+        },
+      };
+    },
+    AbortControllerImpl: AbortController,
+  });
+
+  assert.equal(result.selectedUrl, "http://x-5.tailc1b10e.ts.net:3876");
+  assert.deepEqual(calls, [
+    "http://192.168.28.42:3876/v1/turn",
+    "http://x-5.tailc1b10e.ts.net:3876/v1/turn",
+  ]);
 });
 
 test("requestBridgeTurnProbe reports invalid bridge tokens clearly", async () => {
@@ -759,12 +913,17 @@ test("runTurnForRuntime uses remote bridge on configured mobile", async () => {
     localRunner: async () => ({ assistantText: "LOCAL", command: "codex exec -" }),
     remoteRunner: async (request) => {
       calls.push(request);
-      return { assistantText: "REMOTE", command: "bridge" };
+      return {
+        assistantText: "REMOTE",
+        command: "bridge",
+        selectedUrl: "http://x-5.tailc1b10e.ts.net:3876",
+      };
     },
   });
 
   assert.equal(result.transport, "remote");
   assert.equal(result.assistantText, "REMOTE");
+  assert.equal(result.selectedBridgeUrl, "http://x-5.tailc1b10e.ts.net:3876");
   assert.equal(calls[0].providerId, "codex");
   assert.equal(calls[0].bridge.token, "secret");
 });
@@ -1096,6 +1255,8 @@ test("settings UI exposes default-enabled mobile bridge configuration", () => {
   assert.match(source, /手机端桌面 Bridge/);
   assert.match(source, /启用手机端远程执行/);
   assert.match(source, /Bridge 地址/);
+  assert.match(source, /Bridge 候选地址/);
+  assert.match(source, /addTextArea/);
   assert.match(source, /Bridge Token/);
   assert.match(source, /inputEl\.type = "password"/);
 });
@@ -1133,6 +1294,7 @@ test("sendMessageToActiveSession routes through runtime transport", () => {
   assert.match(source, /requestBridgeTurn/);
   assert.match(source, /localRunner: runProviderTurn/);
   assert.match(source, /remoteRunner: requestBridgeTurn/);
+  assert.match(source, /rememberSelectedBridgeUrl\(result\.selectedBridgeUrl\)/);
   assert.match(source, /手机端记录输入，未配置桌面 Bridge/);
 });
 

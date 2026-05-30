@@ -96,6 +96,8 @@ npm run bridge
 
 `v0.7.4` 起，`检测 Bridge 可达性` 会继续验证 token 和 `/v1/turn` POST 链路。这个探针不会真正运行 agent；如果 Bridge 返回内部探针 provider 不在允许列表中，就说明认证和执行入口已经可达。
 
+`v0.7.5` 起，设置页新增 `Bridge 候选地址`。手机端检测和发送消息时会按顺序自动尝试这些地址，例如同 Wi-Fi 的 `http://192.168.x.x:3876` 和 Tailscale Serve 的 `http://x-5.tailc1b10e.ts.net:3876`；哪个先成功，就会被记为当前 `Bridge 地址`。
+
 ### 原生续接说明
 
 插件默认优先使用 CLI 自带会话能力，减少重复塞入完整历史导致的上下文膨胀：

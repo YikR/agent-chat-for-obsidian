@@ -1,6 +1,7 @@
 const DEFAULT_REMOTE_BRIDGE_SETTINGS = {
   enabled: true,
   url: "http://127.0.0.1:3876",
+  urls: [],
   token: "",
   timeoutMs: 10 * 60 * 1000,
 };
@@ -11,6 +12,7 @@ function mergeRemoteBridgeSettings(saved = {}) {
   return {
     ...DEFAULT_REMOTE_BRIDGE_SETTINGS,
     ...(saved || {}),
+    urls: Array.isArray((saved || {}).urls) ? (saved || {}).urls : [],
   };
 }
 
@@ -18,13 +20,40 @@ function hasRemoteBridgeConfig(bridge) {
   return Boolean(
     bridge &&
       bridge.enabled &&
-      String(bridge.url || "").trim() &&
+      getBridgeCandidateUrls(bridge).length &&
       String(bridge.token || "").trim(),
   );
 }
 
 function normalizeBridgeUrl(url) {
   return String(url || "").trim().replace(/\/+$/, "");
+}
+
+function getBridgeCandidateUrls(bridge = {}) {
+  const seen = new Set();
+  const candidates = [bridge.url, ...(
+    Array.isArray(bridge.urls) ? bridge.urls : []
+  )];
+  const urls = [];
+  for (const candidate of candidates) {
+    const url = normalizeBridgeUrl(candidate);
+    if (!url || seen.has(url)) {
+      continue;
+    }
+    seen.add(url);
+    urls.push(url);
+  }
+  return urls;
+}
+
+function buildCandidateError(action, failures) {
+  if (failures.length === 1) {
+    return failures[0].error;
+  }
+  const details = failures
+    .map((failure) => `${failure.url}: ${failure.error && failure.error.message ? failure.error.message : String(failure.error)}`)
+    .join("; ");
+  return new Error(`${action} failed for all configured Bridge URLs: ${details}`);
 }
 
 function buildBridgeTurnPayload(providerId, session, userInput, settings) {
@@ -69,40 +98,47 @@ async function requestBridgeTurn({
     throw new Error("Remote bridge fetch is unavailable in this runtime");
   }
 
-  const controller = AbortControllerImpl ? new AbortControllerImpl() : null;
   const timeoutMs = Number(bridge.timeoutMs || DEFAULT_REMOTE_BRIDGE_SETTINGS.timeoutMs);
-  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   const payload = buildBridgeTurnPayload(providerId, session, userInput, settings);
+  const failures = [];
 
-  try {
-    const response = await fetchImpl(`${normalizeBridgeUrl(bridge.url)}/v1/turn`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${bridge.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-      signal: controller ? controller.signal : undefined,
-    });
-    const json = await readBridgeJson(response);
-    if (!response.ok || json.ok === false) {
-      throw new Error(`Bridge request failed (${response.status}): ${json.error || response.statusText || "Unknown error"}`);
-    }
-    return {
-      assistantText: json.assistantText || "",
-      command: json.command || "",
-      providerId: json.providerId || providerId,
-    };
-  } catch (error) {
-    if (error && error.name === "AbortError") {
-      throw new Error(`Bridge request timed out after ${timeoutMs}ms`);
-    }
-    throw error;
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
+  for (const url of getBridgeCandidateUrls(bridge)) {
+    const controller = AbortControllerImpl ? new AbortControllerImpl() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      const response = await fetchImpl(`${url}/v1/turn`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${bridge.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        signal: controller ? controller.signal : undefined,
+      });
+      const json = await readBridgeJson(response);
+      if (!response.ok || json.ok === false) {
+        throw new Error(`Bridge request failed (${response.status}): ${json.error || response.statusText || "Unknown error"}`);
+      }
+      return {
+        assistantText: json.assistantText || "",
+        command: json.command || "",
+        providerId: json.providerId || providerId,
+        selectedUrl: url,
+      };
+    } catch (error) {
+      failures.push({
+        url,
+        error: error && error.name === "AbortError"
+          ? new Error(`Bridge request timed out after ${timeoutMs}ms`)
+          : error,
+      });
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
     }
   }
+  throw buildCandidateError("Bridge request", failures);
 }
 
 async function requestBridgeTurnProbe({
@@ -118,8 +154,6 @@ async function requestBridgeTurnProbe({
     throw new Error("Remote bridge fetch is unavailable in this runtime");
   }
 
-  const controller = AbortControllerImpl ? new AbortControllerImpl() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   const payload = {
     providerId: BRIDGE_TURN_PROBE_PROVIDER_ID,
     session: {
@@ -134,44 +168,54 @@ async function requestBridgeTurnProbe({
       providers: {},
     },
   };
+  const failures = [];
 
-  try {
-    const response = await fetchImpl(`${normalizeBridgeUrl(bridge.url)}/v1/turn`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${bridge.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-      signal: controller ? controller.signal : undefined,
-    });
-    const json = await readBridgeJson(response);
-    const message = json.error || response.statusText || "Unknown error";
-    if (response.status === 403 && /Provider is not allowed/.test(String(message))) {
+  for (const url of getBridgeCandidateUrls(bridge)) {
+    const controller = AbortControllerImpl ? new AbortControllerImpl() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      const response = await fetchImpl(`${url}/v1/turn`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${bridge.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        signal: controller ? controller.signal : undefined,
+      });
+      const json = await readBridgeJson(response);
+      const message = json.error || response.statusText || "Unknown error";
+      if (response.status === 403 && /Provider is not allowed/.test(String(message))) {
+        return {
+          ok: true,
+          status: response.status,
+          message,
+          selectedUrl: url,
+        };
+      }
+      if (!response.ok || json.ok === false) {
+        throw new Error(`Bridge turn check failed (${response.status}): ${message}`);
+      }
       return {
         ok: true,
         status: response.status,
-        message,
+        message: "Bridge turn check passed",
+        selectedUrl: url,
       };
-    }
-    if (!response.ok || json.ok === false) {
-      throw new Error(`Bridge turn check failed (${response.status}): ${message}`);
-    }
-    return {
-      ok: true,
-      status: response.status,
-      message: "Bridge turn check passed",
-    };
-  } catch (error) {
-    if (error && error.name === "AbortError") {
-      throw new Error(`Bridge turn check timed out after ${timeoutMs}ms`);
-    }
-    throw error;
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
+    } catch (error) {
+      failures.push({
+        url,
+        error: error && error.name === "AbortError"
+          ? new Error(`Bridge turn check timed out after ${timeoutMs}ms`)
+          : error,
+      });
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
     }
   }
+  throw buildCandidateError("Bridge turn check", failures);
 }
 
 async function requestBridgeHealth({
@@ -180,44 +224,51 @@ async function requestBridgeHealth({
   AbortControllerImpl = globalThis.AbortController,
   timeoutMs = DEFAULT_BRIDGE_HEALTH_TIMEOUT_MS,
 }) {
-  const url = String((bridge || {}).url || "").trim();
-  if (!url) {
+  const urls = getBridgeCandidateUrls(bridge);
+  if (!urls.length) {
     throw new Error("Bridge URL is not configured");
   }
   if (typeof fetchImpl !== "function") {
     throw new Error("Remote bridge fetch is unavailable in this runtime");
   }
 
-  const controller = AbortControllerImpl ? new AbortControllerImpl() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
-  try {
-    const response = await fetchImpl(`${normalizeBridgeUrl(url)}/v1/health`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      signal: controller ? controller.signal : undefined,
-    });
-    const json = await readBridgeJson(response);
-    if (!response.ok || json.ok === false) {
-      throw new Error(`Bridge health check failed (${response.status}): ${json.error || response.statusText || "Unknown error"}`);
-    }
-    return {
-      ok: true,
-      name: json.name || "agent-chat-bridge",
-      version: json.version || "",
-      providers: Array.isArray(json.providers) ? json.providers : [],
-    };
-  } catch (error) {
-    if (error && error.name === "AbortError") {
-      throw new Error(`Bridge health check timed out after ${timeoutMs}ms`);
-    }
-    throw error;
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
+  const failures = [];
+  for (const url of urls) {
+    const controller = AbortControllerImpl ? new AbortControllerImpl() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      const response = await fetchImpl(`${url}/v1/health`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        signal: controller ? controller.signal : undefined,
+      });
+      const json = await readBridgeJson(response);
+      if (!response.ok || json.ok === false) {
+        throw new Error(`Bridge health check failed (${response.status}): ${json.error || response.statusText || "Unknown error"}`);
+      }
+      return {
+        ok: true,
+        name: json.name || "agent-chat-bridge",
+        version: json.version || "",
+        providers: Array.isArray(json.providers) ? json.providers : [],
+        selectedUrl: url,
+      };
+    } catch (error) {
+      failures.push({
+        url,
+        error: error && error.name === "AbortError"
+          ? new Error(`Bridge health check timed out after ${timeoutMs}ms`)
+          : error,
+      });
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
     }
   }
+  throw buildCandidateError("Bridge health check", failures);
 }
 
 module.exports = {
@@ -227,6 +278,7 @@ module.exports = {
   hasRemoteBridgeConfig,
   mergeRemoteBridgeSettings,
   normalizeBridgeUrl,
+  getBridgeCandidateUrls,
   requestBridgeHealth,
   requestBridgeTurnProbe,
   requestBridgeTurn,

@@ -8,7 +8,7 @@ const { resolveWritebackTargets } = require("./src/writebackTargets");
 const { writebackSessionResult } = require("./src/writeback");
 const { writeProviderStatusToObsidian } = require("./src/agentStatusBridge");
 const { WORKFLOW_DEFAULTS, formatTaskBoardRow, insertTaskRow } = require("./src/workflowConfig");
-const { DEFAULT_REMOTE_BRIDGE_SETTINGS, hasRemoteBridgeConfig, mergeRemoteBridgeSettings, requestBridgeHealth, requestBridgeTurnProbe, requestBridgeTurn } = require("./src/bridgeClient");
+const { DEFAULT_REMOTE_BRIDGE_SETTINGS, getBridgeCandidateUrls, hasRemoteBridgeConfig, mergeRemoteBridgeSettings, requestBridgeHealth, requestBridgeTurnProbe, requestBridgeTurn } = require("./src/bridgeClient");
 const { createAutoBridgeConfig, writeBridgeConfig } = require("./src/bridgeSetup");
 const { runTurnForRuntime } = require("./src/turnTransport");
 
@@ -367,6 +367,24 @@ class AgentChatSettingTab extends PluginSettingTab {
       .addText((text) => {
         text.setValue(this.plugin.settings.remoteBridge.url || DEFAULT_REMOTE_BRIDGE_SETTINGS.url).onChange(async (value) => {
           this.plugin.settings.remoteBridge.url = value.trim();
+          await this.plugin.persist();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Bridge 候选地址")
+      .setDesc("一行一个。手机端检测和发送消息时会按顺序自动尝试，成功后会把可用地址记为当前 Bridge 地址。")
+      .addTextArea((text) => {
+        text.inputEl.rows = 4;
+        text.setValue(getBridgeCandidateUrls(this.plugin.settings.remoteBridge).join("\n")).onChange(async (value) => {
+          const urls = value
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean);
+          this.plugin.settings.remoteBridge.urls = urls;
+          if (!String(this.plugin.settings.remoteBridge.url || "").trim() && urls.length) {
+            this.plugin.settings.remoteBridge.url = urls[0];
+          }
           await this.plugin.persist();
         });
       });
@@ -883,18 +901,39 @@ module.exports = class AgentChatPlugin extends Plugin {
     return `http://127.0.0.1:${port}`;
   }
 
+  rememberSelectedBridgeUrl(selectedUrl) {
+    const url = String(selectedUrl || "").trim();
+    if (!url) {
+      return false;
+    }
+    const remoteBridge = mergeRemoteBridgeSettings(this.settings.remoteBridge);
+    const candidates = getBridgeCandidateUrls({
+      ...remoteBridge,
+      url,
+      urls: [url, ...getBridgeCandidateUrls(remoteBridge)],
+    });
+    this.settings.remoteBridge = {
+      ...remoteBridge,
+      url,
+      urls: candidates,
+    };
+    return true;
+  }
+
   async checkRemoteBridgeHealth() {
     const remoteBridge = this.settings.remoteBridge || {};
     const healthBridge = {
       ...remoteBridge,
       url: this.isMobileRuntime() ? remoteBridge.url : this.getBridgeHealthCheckUrl(remoteBridge),
+      urls: this.isMobileRuntime() ? remoteBridge.urls : [],
     };
     try {
       const result = await requestBridgeHealth({
         bridge: healthBridge,
       });
+      let probeResult = null;
       try {
-        await requestBridgeTurnProbe({
+        probeResult = await requestBridgeTurnProbe({
           bridge: healthBridge,
         });
       } catch (error) {
@@ -902,9 +941,14 @@ module.exports = class AgentChatPlugin extends Plugin {
         new Notice(`Bridge 可达，但执行请求检测失败：${message}`);
         return;
       }
+      const selectedUrl = (probeResult && probeResult.selectedUrl) || result.selectedUrl || "";
+      if (this.isMobileRuntime() && this.rememberSelectedBridgeUrl(selectedUrl)) {
+        await this.persist();
+      }
       const providers = (result.providers || []).join(" / ") || "未返回 provider 列表";
       const scope = this.isMobileRuntime() ? "远程" : "本机";
-      new Notice(`${scope} Bridge 可达，token/POST 可用：${result.name}；providers：${providers}`);
+      const suffix = selectedUrl ? `；地址：${selectedUrl}` : "";
+      new Notice(`${scope} Bridge 可达，token/POST 可用：${result.name}；providers：${providers}${suffix}`);
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
       new Notice(`Bridge 不可达：${message}`);
@@ -1113,6 +1157,9 @@ module.exports = class AgentChatPlugin extends Plugin {
         },
       });
       this.running.delete(session.id);
+      if (this.isMobileRuntime() && this.rememberSelectedBridgeUrl(result.selectedBridgeUrl)) {
+        await this.persist();
+      }
       const assistantText = result.assistantText || streamedText || "(No response text returned)";
       updateMessageContent(session, assistantMessage.id, assistantText);
       recordProviderResult(this.state.providerStatus, providerId, {
