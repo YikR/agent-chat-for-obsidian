@@ -16,6 +16,13 @@ const { resolveWritebackTargets } = require("../src/writebackTargets");
 const { writebackSessionResult } = require("../src/writeback");
 const { WORKFLOW_DEFAULTS, formatTaskBoardRow, insertTaskRow } = require("../src/workflowConfig");
 const { renderProviderStatusBlock, replaceOrAppendMarker, STATUS_MARKER } = require("../src/agentStatusBridge");
+const {
+  DEFAULT_REMOTE_BRIDGE_SETTINGS,
+  buildBridgeTurnPayload,
+  hasRemoteBridgeConfig,
+  mergeRemoteBridgeSettings,
+  requestBridgeTurn,
+} = require("../src/bridgeClient");
 
 test("createDefaultState returns a usable empty shell", () => {
   const state = createDefaultState();
@@ -216,6 +223,138 @@ test("createSpawnSpec can make Codex bypass approvals and sandbox when configure
   });
 
   assert.ok(spec.args.includes("--dangerously-bypass-approvals-and-sandbox"));
+});
+
+test("mergeRemoteBridgeSettings keeps mobile bridge enabled by default without exposing a token", () => {
+  const settings = mergeRemoteBridgeSettings();
+
+  assert.deepEqual(settings, DEFAULT_REMOTE_BRIDGE_SETTINGS);
+  assert.equal(settings.enabled, true);
+  assert.equal(settings.token, "");
+  assert.equal(hasRemoteBridgeConfig(settings), false);
+});
+
+test("hasRemoteBridgeConfig requires enabled url and token", () => {
+  assert.equal(hasRemoteBridgeConfig({
+    enabled: true,
+    url: "http://192.168.1.2:3876",
+    token: "secret",
+    timeoutMs: 1000,
+  }), true);
+  assert.equal(hasRemoteBridgeConfig({
+    enabled: true,
+    url: "http://192.168.1.2:3876",
+    token: "",
+    timeoutMs: 1000,
+  }), false);
+  assert.equal(hasRemoteBridgeConfig({
+    enabled: false,
+    url: "http://192.168.1.2:3876",
+    token: "secret",
+    timeoutMs: 1000,
+  }), false);
+});
+
+test("buildBridgeTurnPayload sends only provider turn data", () => {
+  const session = createSession({
+    id: "session-mobile",
+    providerId: "codex",
+    title: "Mobile run",
+    projectPath: "02-项目/Obsidian工作流/项目主页.md",
+  });
+
+  const payload = buildBridgeTurnPayload("codex", session, "continue", {
+    providers: {
+      codex: {
+        enabled: true,
+        cliPath: "codex",
+        cwd: "/Users/yanyunuo",
+        timeoutMs: 600000,
+        extraArgs: "",
+        nativeResume: true,
+        permissionMode: "danger-full-access",
+      },
+    },
+    remoteBridge: {
+      enabled: true,
+      url: "http://192.168.1.2:3876",
+      token: "secret",
+      timeoutMs: 600000,
+    },
+  });
+
+  assert.equal(payload.providerId, "codex");
+  assert.equal(payload.userInput, "continue");
+  assert.equal(payload.session.id, "session-mobile");
+  assert.equal(payload.settings.providers.codex.cwd, "/Users/yanyunuo");
+  assert.equal(payload.settings.remoteBridge, undefined);
+});
+
+test("requestBridgeTurn sends bearer token and parses success", async () => {
+  const calls = [];
+  const fakeFetch = async (url, options) => {
+    calls.push({ url, options });
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          ok: true,
+          assistantText: "OK",
+          command: "codex exec -",
+          providerId: "codex",
+        };
+      },
+    };
+  };
+
+  const result = await requestBridgeTurn({
+    bridge: {
+      enabled: true,
+      url: "http://127.0.0.1:3876/",
+      token: "secret",
+      timeoutMs: 1000,
+    },
+    providerId: "codex",
+    session: createSession({ id: "session-remote", providerId: "codex", title: "Remote" }),
+    userInput: "Reply with exactly: OK",
+    settings: { providers: { codex: { enabled: true } } },
+    fetchImpl: fakeFetch,
+    AbortControllerImpl: AbortController,
+  });
+
+  assert.equal(result.assistantText, "OK");
+  assert.equal(calls[0].url, "http://127.0.0.1:3876/v1/turn");
+  assert.equal(calls[0].options.headers.Authorization, "Bearer secret");
+  assert.equal(calls[0].options.headers["Content-Type"], "application/json");
+});
+
+test("requestBridgeTurn converts bridge failures into readable errors", async () => {
+  const fakeFetch = async () => ({
+    ok: false,
+    status: 401,
+    async json() {
+      return { ok: false, error: "Unauthorized" };
+    },
+  });
+
+  await assert.rejects(
+    () => requestBridgeTurn({
+      bridge: {
+        enabled: true,
+        url: "http://127.0.0.1:3876",
+        token: "bad-token",
+        timeoutMs: 1000,
+      },
+      providerId: "codex",
+      session: createSession({ id: "session-remote-fail", providerId: "codex", title: "Remote" }),
+      userInput: "run",
+      settings: { providers: { codex: { enabled: true } } },
+      fetchImpl: fakeFetch,
+      AbortControllerImpl: AbortController,
+    }),
+    /Bridge request failed \(401\): Unauthorized/,
+  );
 });
 
 test("createSpawnSpec builds a claude print command", () => {
