@@ -23,6 +23,28 @@ const {
   mergeRemoteBridgeSettings,
   requestBridgeTurn,
 } = require("../src/bridgeClient");
+const { createBridgeServer, DEFAULT_BRIDGE_CONFIG } = require("../src/bridgeServer");
+
+function listen(server) {
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      resolve(`http://127.0.0.1:${address.port}`);
+    });
+  });
+}
+
+function closeServer(server) {
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
 
 test("createDefaultState returns a usable empty shell", () => {
   const state = createDefaultState();
@@ -355,6 +377,142 @@ test("requestBridgeTurn converts bridge failures into readable errors", async ()
     }),
     /Bridge request failed \(401\): Unauthorized/,
   );
+});
+
+test("createBridgeServer exposes health with configured providers", async () => {
+  const server = createBridgeServer({
+    config: {
+      ...DEFAULT_BRIDGE_CONFIG,
+      token: "secret",
+      allowedProviders: ["codex", "openclaw"],
+    },
+    providerRunner: async () => ({ assistantText: "unused", command: "unused" }),
+  });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/v1/health`);
+    const json = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(json.ok, true);
+    assert.deepEqual(json.providers, ["codex", "openclaw"]);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("bridge server rejects turn requests without token", async () => {
+  const server = createBridgeServer({
+    config: {
+      ...DEFAULT_BRIDGE_CONFIG,
+      token: "secret",
+      allowedProviders: ["codex"],
+    },
+    providerRunner: async () => ({ assistantText: "unused", command: "unused" }),
+  });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/v1/turn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        providerId: "codex",
+        session: createSession({ id: "session-server", providerId: "codex", title: "Server" }),
+        userInput: "run",
+        settings: { providers: { codex: { enabled: true } } },
+      }),
+    });
+    const json = await response.json();
+
+    assert.equal(response.status, 401);
+    assert.equal(json.ok, false);
+    assert.equal(json.error, "Unauthorized");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("bridge server rejects providers outside allowlist", async () => {
+  const server = createBridgeServer({
+    config: {
+      ...DEFAULT_BRIDGE_CONFIG,
+      token: "secret",
+      allowedProviders: ["codex"],
+    },
+    providerRunner: async () => ({ assistantText: "unused", command: "unused" }),
+  });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/v1/turn`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer secret",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        providerId: "openclaw",
+        session: createSession({ id: "session-server-denied", providerId: "openclaw", title: "Server" }),
+        userInput: "run",
+        settings: { providers: { openclaw: { enabled: true } } },
+      }),
+    });
+    const json = await response.json();
+
+    assert.equal(response.status, 403);
+    assert.equal(json.ok, false);
+    assert.equal(json.error, "Provider is not allowed: openclaw");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("bridge server executes turn through injected provider runner", async () => {
+  const calls = [];
+  const server = createBridgeServer({
+    config: {
+      ...DEFAULT_BRIDGE_CONFIG,
+      token: "secret",
+      allowedProviders: ["codex"],
+      defaultCwd: "/Users/yanyunuo",
+    },
+    providerRunner: async (providerId, session, userInput, settings, options) => {
+      calls.push({ providerId, session, userInput, settings, options });
+      return {
+        assistantText: "OK",
+        command: "codex exec -",
+      };
+    },
+  });
+  const baseUrl = await listen(server);
+
+  try {
+    const response = await fetch(`${baseUrl}/v1/turn`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer secret",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        providerId: "codex",
+        session: createSession({ id: "session-server-ok", providerId: "codex", title: "Server" }),
+        userInput: "run",
+        settings: { providers: { codex: { enabled: true } } },
+      }),
+    });
+    const json = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(json.ok, true);
+    assert.equal(json.assistantText, "OK");
+    assert.equal(json.providerId, "codex");
+    assert.equal(calls[0].providerId, "codex");
+    assert.equal(calls[0].options.cwd, "/Users/yanyunuo");
+  } finally {
+    await closeServer(server);
+  }
 });
 
 test("createSpawnSpec builds a claude print command", () => {

@@ -4,6 +4,7 @@
   "description": "在 Obsidian 中统一接入 Codex、Claude、Hermes 和 OpenClaw 的持续对话工作台。",
   "main": "main.js",
   "scripts": {
+    "bridge": "node scripts/agent-chat-bridge.js",
     "build": "node scripts/build.js",
     "test": "npm run build && node --test"
   },
