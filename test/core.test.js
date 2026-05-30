@@ -22,6 +22,7 @@ const {
   hasRemoteBridgeConfig,
   mergeRemoteBridgeSettings,
   requestBridgeHealth,
+  requestBridgeTurnProbe,
   requestBridgeTurn,
 } = require("../src/bridgeClient");
 const {
@@ -515,6 +516,61 @@ test("requestBridgeHealth reports unreachable bridge clearly", async () => {
       AbortControllerImpl: AbortController,
     }),
     /Bridge health check failed \(503\): Bridge down/,
+  );
+});
+
+test("requestBridgeTurnProbe validates authenticated POST without running an agent", async () => {
+  const calls = [];
+  const result = await requestBridgeTurnProbe({
+    bridge: {
+      enabled: true,
+      url: "http://100.89.12.34:3876/",
+      token: "secret",
+      timeoutMs: 600000,
+    },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return {
+        ok: false,
+        status: 403,
+        async json() {
+          return { ok: false, error: "Provider is not allowed: __agent_chat_probe__" };
+        },
+      };
+    },
+    AbortControllerImpl: AbortController,
+  });
+
+  const body = JSON.parse(calls[0].options.body);
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 403);
+  assert.equal(calls[0].url, "http://100.89.12.34:3876/v1/turn");
+  assert.equal(calls[0].options.method, "POST");
+  assert.equal(calls[0].options.headers.Authorization, "Bearer secret");
+  assert.equal(calls[0].options.headers["Content-Type"], "application/json");
+  assert.equal(body.providerId, "__agent_chat_probe__");
+});
+
+test("requestBridgeTurnProbe reports invalid bridge tokens clearly", async () => {
+  await assert.rejects(
+    () => requestBridgeTurnProbe({
+      bridge: {
+        enabled: true,
+        url: "http://100.89.12.34:3876",
+        token: "stale-token",
+        timeoutMs: 600000,
+      },
+      fetchImpl: async () => ({
+        ok: false,
+        status: 401,
+        statusText: "Unauthorized",
+        async json() {
+          return { ok: false, error: "Unauthorized" };
+        },
+      }),
+      AbortControllerImpl: AbortController,
+    }),
+    /Bridge turn check failed \(401\): Unauthorized/,
   );
 });
 
@@ -1058,6 +1114,8 @@ test("settings UI exposes bridge reachability check and remote network guidance"
   assert.match(source, /检测 Bridge 可达性/);
   assert.match(source, /Tailscale/);
   assert.match(source, /checkRemoteBridgeHealth/);
+  assert.match(source, /requestBridgeTurnProbe/);
+  assert.match(source, /token\/POST 可用/);
 });
 
 test("desktop bridge health check uses local URL while mobile uses remote URL", () => {

@@ -8,7 +8,7 @@ const { resolveWritebackTargets } = require("./src/writebackTargets");
 const { writebackSessionResult } = require("./src/writeback");
 const { writeProviderStatusToObsidian } = require("./src/agentStatusBridge");
 const { WORKFLOW_DEFAULTS, formatTaskBoardRow, insertTaskRow } = require("./src/workflowConfig");
-const { DEFAULT_REMOTE_BRIDGE_SETTINGS, hasRemoteBridgeConfig, mergeRemoteBridgeSettings, requestBridgeHealth, requestBridgeTurn } = require("./src/bridgeClient");
+const { DEFAULT_REMOTE_BRIDGE_SETTINGS, hasRemoteBridgeConfig, mergeRemoteBridgeSettings, requestBridgeHealth, requestBridgeTurnProbe, requestBridgeTurn } = require("./src/bridgeClient");
 const { createAutoBridgeConfig, writeBridgeConfig } = require("./src/bridgeSetup");
 const { runTurnForRuntime } = require("./src/turnTransport");
 
@@ -893,9 +893,18 @@ module.exports = class AgentChatPlugin extends Plugin {
       const result = await requestBridgeHealth({
         bridge: healthBridge,
       });
+      try {
+        await requestBridgeTurnProbe({
+          bridge: healthBridge,
+        });
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        new Notice(`Bridge 可达，但执行请求检测失败：${message}`);
+        return;
+      }
       const providers = (result.providers || []).join(" / ") || "未返回 provider 列表";
       const scope = this.isMobileRuntime() ? "远程" : "本机";
-      new Notice(`${scope} Bridge 可达：${result.name}；providers：${providers}`);
+      new Notice(`${scope} Bridge 可达，token/POST 可用：${result.name}；providers：${providers}`);
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
       new Notice(`Bridge 不可达：${message}`);

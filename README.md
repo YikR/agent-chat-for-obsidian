@@ -94,6 +94,8 @@ npm run bridge
 
 `v0.7.3` 起，`检测 Bridge 可达性` 会按运行端分流：桌面端检测 `127.0.0.1:<port>`，手机端检测插件设置里的远程 URL。这是为了适配 Tailscale formula 的 userspace networking 场景：手机可以通过 Tailscale Serve 访问 MagicDNS 地址，但桌面端自测自己的 MagicDNS 地址可能返回空响应。
 
+`v0.7.4` 起，`检测 Bridge 可达性` 会继续验证 token 和 `/v1/turn` POST 链路。这个探针不会真正运行 agent；如果 Bridge 返回内部探针 provider 不在允许列表中，就说明认证和执行入口已经可达。
+
 ### 原生续接说明
 
 插件默认优先使用 CLI 自带会话能力，减少重复塞入完整历史导致的上下文膨胀：

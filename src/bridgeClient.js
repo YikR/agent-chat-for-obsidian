@@ -5,6 +5,7 @@ const DEFAULT_REMOTE_BRIDGE_SETTINGS = {
   timeoutMs: 10 * 60 * 1000,
 };
 const DEFAULT_BRIDGE_HEALTH_TIMEOUT_MS = 10 * 1000;
+const BRIDGE_TURN_PROBE_PROVIDER_ID = "__agent_chat_probe__";
 
 function mergeRemoteBridgeSettings(saved = {}) {
   return {
@@ -104,6 +105,75 @@ async function requestBridgeTurn({
   }
 }
 
+async function requestBridgeTurnProbe({
+  bridge,
+  fetchImpl = globalThis.fetch,
+  AbortControllerImpl = globalThis.AbortController,
+  timeoutMs = DEFAULT_BRIDGE_HEALTH_TIMEOUT_MS,
+}) {
+  if (!hasRemoteBridgeConfig(bridge)) {
+    throw new Error("Remote bridge is not configured");
+  }
+  if (typeof fetchImpl !== "function") {
+    throw new Error("Remote bridge fetch is unavailable in this runtime");
+  }
+
+  const controller = AbortControllerImpl ? new AbortControllerImpl() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const payload = {
+    providerId: BRIDGE_TURN_PROBE_PROVIDER_ID,
+    session: {
+      id: "bridge-turn-probe",
+      providerId: BRIDGE_TURN_PROBE_PROVIDER_ID,
+      title: "Bridge turn probe",
+      messages: [],
+      nativeSessions: {},
+    },
+    userInput: "probe",
+    settings: {
+      providers: {},
+    },
+  };
+
+  try {
+    const response = await fetchImpl(`${normalizeBridgeUrl(bridge.url)}/v1/turn`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${bridge.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: controller ? controller.signal : undefined,
+    });
+    const json = await readBridgeJson(response);
+    const message = json.error || response.statusText || "Unknown error";
+    if (response.status === 403 && /Provider is not allowed/.test(String(message))) {
+      return {
+        ok: true,
+        status: response.status,
+        message,
+      };
+    }
+    if (!response.ok || json.ok === false) {
+      throw new Error(`Bridge turn check failed (${response.status}): ${message}`);
+    }
+    return {
+      ok: true,
+      status: response.status,
+      message: "Bridge turn check passed",
+    };
+  } catch (error) {
+    if (error && error.name === "AbortError") {
+      throw new Error(`Bridge turn check timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 async function requestBridgeHealth({
   bridge,
   fetchImpl = globalThis.fetch,
@@ -158,5 +228,6 @@ module.exports = {
   mergeRemoteBridgeSettings,
   normalizeBridgeUrl,
   requestBridgeHealth,
+  requestBridgeTurnProbe,
   requestBridgeTurn,
 };

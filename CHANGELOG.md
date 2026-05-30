@@ -1,5 +1,12 @@
 # 变更记录
 
+## 0.7.4 - 2026-05-31
+
+- `检测 Bridge 可达性` 现在会在健康检查后额外发起一次带 token 的轻量 `/v1/turn` POST 探针，确认 token 和执行请求链路可用。
+- 探针使用内部 provider id，不会真正运行 agent；Bridge 返回 `Provider is not allowed` 时视为认证和 POST 链路通过。
+- token 失效、POST 被拦截或 Bridge 执行入口异常时，会显示更具体的错误提示。
+- 新增 Bridge POST 探针和无效 token 回归测试。
+
 ## 0.7.3 - 2026-05-30
 
 - 修复桌面端点击 `检测 Bridge 可达性` 显示不可达、但手机端可达的问题。
