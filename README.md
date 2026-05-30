@@ -70,7 +70,7 @@ GitHub 仓库：`https://github.com/YikR/agent-chat-for-obsidian`
 2. 点击 `一键初始化手机 Bridge`。
 3. 在这个仓库目录运行 `npm run bridge`。
 4. 等 Obsidian/iCloud 同步插件数据后，手机端会自动读取 Bridge URL/token。
-5. 在手机端或桌面端点击 `检测 Bridge 可达性`，确认当前网络下 URL 能访问。
+5. 在手机端或桌面端点击 `检测 Bridge 可达性`。桌面端会检测本机 Bridge，手机端会检测远程 Bridge URL。
 
 手动配置方式：
 
@@ -91,6 +91,8 @@ npm run bridge
 手动配置时，Bridge config 里的 `host` 建议保持 `0.0.0.0` 作为监听地址；手机端真正访问的地址填写在插件设置的 `Bridge 地址` 中，例如 `http://100.x.x.x:3876` 或 `http://192.168.1.2:3876`。`127.0.0.1` 只代表当前设备。插件默认倾向使用 Bridge，但真实 URL/token 只保存在你的本地插件配置里。不要把 Bridge 暴露到公网；第一版只支持可信局域网或虚拟局域网使用。
 
 `v0.7.2` 起，自动初始化写入的 Bridge 服务端监听地址为 `0.0.0.0`，这样同一个 Bridge 进程可以同时接受 Wi-Fi 局域网和 Tailscale/虚拟局域网流量；手机端实际访问哪个地址由插件设置里的 `Bridge 地址` 决定。不要把这个端口直接暴露到公网。
+
+`v0.7.3` 起，`检测 Bridge 可达性` 会按运行端分流：桌面端检测 `127.0.0.1:<port>`，手机端检测插件设置里的远程 URL。这是为了适配 Tailscale formula 的 userspace networking 场景：手机可以通过 Tailscale Serve 访问 MagicDNS 地址，但桌面端自测自己的 MagicDNS 地址可能返回空响应。
 
 ### 原生续接说明
 

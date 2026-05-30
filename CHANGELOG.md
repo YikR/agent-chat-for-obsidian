@@ -1,5 +1,12 @@
 # 变更记录
 
+## 0.7.3 - 2026-05-30
+
+- 修复桌面端点击 `检测 Bridge 可达性` 显示不可达、但手机端可达的问题。
+- 桌面端检测现在优先检查本机 `127.0.0.1:<port>` Bridge；手机端继续检查远程 Bridge URL。
+- 这个分流适配 Tailscale formula 的 userspace networking：手机通过 Tailscale Serve 可访问，桌面端不再用自己的 MagicDNS 地址自测。
+- 新增桌面/手机健康检查目标分流测试。
+
 ## 0.7.2 - 2026-05-30
 
 - 新增远程网络模式支持：自动初始化手机 Bridge 时优先识别 Tailscale `100.x.x.x` 地址，未检测到时再使用普通局域网 IP。

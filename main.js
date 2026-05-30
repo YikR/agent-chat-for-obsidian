@@ -353,7 +353,7 @@ class AgentChatSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("检测 Bridge 可达性")
-      .setDesc("检查当前 Bridge 地址是否能访问。手机不在同一 Wi-Fi 时，建议把地址改成 Tailscale / ZeroTier / WireGuard 这类虚拟局域网地址。")
+      .setDesc("桌面端检查本机 Bridge，手机端检查远程 Bridge 地址。手机不在同一 Wi-Fi 时，建议把地址改成 Tailscale / ZeroTier / WireGuard 这类虚拟局域网地址。")
       .addButton((button) => {
         button.setButtonText("检测");
         button.onClick(async () => {
@@ -874,13 +874,28 @@ module.exports = class AgentChatPlugin extends Plugin {
     }
   }
 
+  getBridgeHealthCheckUrl(remoteBridge = {}) {
+    if (this.isMobileRuntime()) {
+      return remoteBridge.url;
+    }
+    const parsed = String(remoteBridge.url || "").match(/:(\d+)(?:\/|$)/);
+    const port = parsed ? parsed[1] : "3876";
+    return `http://127.0.0.1:${port}`;
+  }
+
   async checkRemoteBridgeHealth() {
+    const remoteBridge = this.settings.remoteBridge || {};
+    const healthBridge = {
+      ...remoteBridge,
+      url: this.isMobileRuntime() ? remoteBridge.url : this.getBridgeHealthCheckUrl(remoteBridge),
+    };
     try {
       const result = await requestBridgeHealth({
-        bridge: this.settings.remoteBridge,
+        bridge: healthBridge,
       });
       const providers = (result.providers || []).join(" / ") || "未返回 provider 列表";
-      new Notice(`Bridge 可达：${result.name}；providers：${providers}`);
+      const scope = this.isMobileRuntime() ? "远程" : "本机";
+      new Notice(`${scope} Bridge 可达：${result.name}；providers：${providers}`);
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
       new Notice(`Bridge 不可达：${message}`);

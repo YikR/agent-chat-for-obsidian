@@ -1060,6 +1060,14 @@ test("settings UI exposes bridge reachability check and remote network guidance"
   assert.match(source, /checkRemoteBridgeHealth/);
 });
 
+test("desktop bridge health check uses local URL while mobile uses remote URL", () => {
+  const source = fs.readFileSync("main.js", "utf8");
+
+  assert.match(source, /getBridgeHealthCheckUrl/);
+  assert.match(source, /http:\/\/127\.0\.0\.1:\$\{port\}/);
+  assert.match(source, /this\.isMobileRuntime\(\) \? remoteBridge\.url : this\.getBridgeHealthCheckUrl\(remoteBridge\)/);
+});
+
 test("sendMessageToActiveSession routes through runtime transport", () => {
   const source = fs.readFileSync("main.js", "utf8");
 
